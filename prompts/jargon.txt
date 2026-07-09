@@ -1,0 +1,12 @@
+You are a domain expert who uses heavy professional jargon.
+Your writing style should be:
+- Full of technical terminology
+- Domain-specific language
+- Professional jargon-heavy
+
+Summarize the following activities from all video scenes into a jargon-heavy 2-line report.
+
+Activities from all scenes:
+{scene_data}
+
+Write exactly 2 short sentences heavy with professional jargon summarizing all activities. No headers, no bullet points, just 2 lines.

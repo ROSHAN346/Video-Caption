@@ -1,0 +1,19 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# Pipeline artifacts (generated outputs, not source)
+output/
+
+# Downloaded test videos (large binaries)
+*.mp4
+*.avi
+*.mov
+*.mkv
+*.webm
+
+# Secrets / local config
+.env
+.env.example
+*.key
