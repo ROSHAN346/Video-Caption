@@ -64,11 +64,6 @@ def parse_args():
         help="Generate reports in all styles"
     )
     parser.add_argument(
-        "--no-pdf",
-        action="store_true",
-        help="Skip PDF generation"
-    )
-    parser.add_argument(
         "--provider",
         choices=["fireworks", "gemini"],
         default=AI_PROVIDER,
@@ -82,7 +77,6 @@ def generate_reports_pipeline(
     selected: list,
     scenes: list,
     styles: list[str],
-    generate_pdf: bool = True,
     provider: str = AI_PROVIDER
 ):
     """Run the report generation pipeline: Fireworks vision + Groq text."""
@@ -92,7 +86,6 @@ def generate_reports_pipeline(
     from services.scene_aggregator import aggregate_by_scene
     from services.report_generator import generate_all_reports
     from services.report_cache import ReportCache
-    from services.pdf_generator import generate_report_pdf
 
     logger.info("=== START Report Generation (Fireworks vision + Groq text) ===")
 
@@ -183,6 +176,7 @@ def generate_reports_pipeline(
 
     # Generate reports
     logger.info(f"Generating {len(styles)} report styles...")
+    all_captions = {}
     for scene_id, scene_data in scene_analyses.items():
         logger.info(f"Processing scene {scene_id}...")
 
@@ -200,22 +194,8 @@ def generate_reports_pipeline(
             md_path = cache.get_cache_path(scene_id, style)
             logger.info(f"Saved {style} report: {md_path}")
 
-            # Generate PDF if enabled
-            if generate_pdf:
-                keyframe_path = str(output_dir / f"keyframe_000.jpg")
-                pdf_path = cache.get_pdf_path(scene_id, style)
-                try:
-                    generate_report_pdf(
-                        scene_id=scene_id,
-                        style=style,
-                        report=report,
-                        keyframe_path=keyframe_path,
-                        scene_data=scene_data,
-                        output_path=str(pdf_path)
-                    )
-                    logger.info(f"Generated PDF: {pdf_path}")
-                except Exception as e:
-                    logger.error(f"Error generating PDF for {style}: {e}")
+            # Collect captions
+            all_captions[style] = report
 
     # Print summary
     stats = cache.get_cache_stats()
@@ -223,6 +203,8 @@ def generate_reports_pipeline(
     logger.info(f"Scenes processed: {stats['total_scenes']}")
     logger.info(f"Reports generated: {stats['total_reports']}")
     logger.info(f"Output directory: {output_dir / 'reports'}")
+
+    return all_captions
 
 
 def format_timecode(seconds: float) -> str:
@@ -604,16 +586,27 @@ def main():
     # --- Report Generation (if enabled) ---
     if args.reports:
         report_start = time.time()
-        generate_reports_pipeline(
+        captions = generate_reports_pipeline(
             output_dir=output_dir,
             selected=selected,
             scenes=scenes,
             styles=styles,
-            generate_pdf=not args.no_pdf,
             provider=args.provider
         )
         report_total = time.time() - report_start
         logger.info(f"Report generation completed in {report_total:.2f}s")
+
+        # Save captions to JSON
+        output_json = {
+            "video": video_path,
+            "scenes": scenes_data,
+            "keyframes": keyframes_data,
+            "captions": captions
+        }
+        json_path = output_dir / "captions.json"
+        with open(json_path, "w") as f:
+            json.dump(output_json, f, indent=2)
+        logger.info(f"✅ Captions saved to: {json_path.resolve()}")
 
 
 if __name__ == "__main__":

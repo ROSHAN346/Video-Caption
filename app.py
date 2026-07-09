@@ -108,8 +108,6 @@ if enable_reports:
         default=["formal", "sarcastic"]
     )
 
-    generate_pdf = st.sidebar.checkbox("Generate PDFs", value=True)
-
 # --- Main Interface ---
 col1, col2 = st.columns([1, 1])
 
@@ -301,7 +299,6 @@ with col2:
                     from services.scene_aggregator import aggregate_by_scene
                     from services.report_generator import generate_all_reports
                     from services.report_cache import ReportCache
-                    from services.pdf_generator import generate_report_pdf
 
                     selected = st.session_state["selected"]
                     scenes = st.session_state["scenes"]
@@ -393,18 +390,6 @@ with col2:
                                     "text_model": text_model,
                                     "provider": provider_choice
                                 })
-
-                                if generate_pdf:
-                                    keyframe_path = str(output_dir / f"keyframe_000.jpg")
-                                    pdf_path = cache.get_pdf_path(scene_id, style)
-                                    generate_report_pdf(
-                                        scene_id=scene_id,
-                                        style=style,
-                                        report=report,
-                                        keyframe_path=keyframe_path,
-                                        scene_data=scene_data,
-                                        output_path=str(pdf_path)
-                                    )
 
                         t_report_done = time.time() - t_report_start
                         t_total_report = t_vision_done + t_report_done
@@ -792,27 +777,13 @@ if "reports" in st.session_state and "scene_analyses" in st.session_state:
             st.markdown(report)
 
             # Download buttons
-            col1, col2 = st.columns(2)
-            with col1:
-                st.download_button(
-                    f"📄 Download {style}.md",
-                    report,
-                    file_name=f"{style}.md",
-                    mime="text/markdown",
-                    key=f"dl_md_{style}"
-                )
-            with col2:
-                if "generate_pdf" in dir() and generate_pdf:
-                    pdf_path = output_dir / "reports" / "scene_001" / f"{style}.pdf"
-                    if pdf_path.exists():
-                        with open(pdf_path, "rb") as f:
-                            st.download_button(
-                                f"📥 Download {style}.pdf",
-                                f.read(),
-                                file_name=f"{style}.pdf",
-                                mime="application/pdf",
-                                key=f"dl_pdf_{style}"
-                            )
+            st.download_button(
+                f"📄 Download {style}.md",
+                report,
+                file_name=f"{style}.md",
+                mime="text/markdown",
+                key=f"dl_md_{style}"
+            )
 
     # Scene Analysis Details
     st.divider()

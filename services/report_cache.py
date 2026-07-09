@@ -42,21 +42,6 @@ class ReportCache:
         scene_dir.mkdir(parents=True, exist_ok=True)
         return scene_dir / f"{style}.md"
 
-    def get_pdf_path(self, scene_id: int, style: str) -> Path:
-        """
-        Get the file path for a cached PDF report.
-
-        Args:
-            scene_id: Scene ID
-            style: Report style
-
-        Returns:
-            Path to cached PDF file
-        """
-        scene_dir = self.base_dir / f"scene_{scene_id:03d}"
-        scene_dir.mkdir(parents=True, exist_ok=True)
-        return scene_dir / f"{style}.pdf"
-
     def get_cache_metadata_path(self, scene_id: int) -> Path:
         """
         Get the file path for cache metadata.
