@@ -6,6 +6,7 @@ Generates multi-tone reports using Hugging Face text models.
 
 import logging
 from typing import Optional
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from services.fireworks_client import FireworksClient
 from services.prompt_loader import load_prompt, format_prompt
@@ -91,13 +92,19 @@ def generate_all_reports(
     styles = styles or REPORT_STYLES
     reports = {}
 
-    for style in styles:
+    def _gen_one(style):
         try:
             report = generate_report(scene_data, style, hf_client, model)
-            reports[style] = report
+            return style, report
         except Exception as e:
             logger.error(f"Error generating {style} report: {e}")
-            reports[style] = f"Error generating report: {e}"
+            return style, f"Error generating report: {e}"
+
+    with ThreadPoolExecutor(max_workers=min(len(styles), 4)) as executor:
+        futures = {executor.submit(_gen_one, style): style for style in styles}
+        for future in as_completed(futures):
+            style, report = future.result()
+            reports[style] = report
 
     return reports
 
@@ -226,12 +233,19 @@ def generate_video_summary_reports(
     }
 
     reports = {}
-    for style in styles:
+
+    def _gen_one(style):
         try:
             report = generate_report(combined_data, style, hf_client, model)
-            reports[style] = report
+            return style, report
         except Exception as e:
             logger.error(f"Error generating {style} report: {e}")
-            reports[style] = f"Error generating report: {e}"
+            return style, f"Error generating report: {e}"
+
+    with ThreadPoolExecutor(max_workers=min(len(styles), 4)) as executor:
+        futures = {executor.submit(_gen_one, style): style for style in styles}
+        for future in as_completed(futures):
+            style, report = future.result()
+            reports[style] = report
 
     return reports
