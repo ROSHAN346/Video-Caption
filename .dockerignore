@@ -1,0 +1,17 @@
+.git
+__pycache__
+*.pyc
+*.pyo
+.env
+.env.example
+output/
+*.mp4
+*.avi
+*.mov
+*.mkv
+*.webm
+.DS_Store
+*.log
+.pytest_cache
+.mypy_cache
+.ruff_cache
