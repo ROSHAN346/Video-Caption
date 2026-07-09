@@ -16,8 +16,11 @@ from config import (
     FRAME_STRATEGY, MAX_FRAMES, REPORT_STYLES,
     DEFAULT_REPORT_STYLE, FIREWORKS_API_KEY, FIREWORKS_VISION_MODEL, FIREWORKS_TEXT_MODEL,
     GEMINI_API_KEY, GEMINI_VISION_MODEL, GEMINI_TEXT_MODEL,
+    GROQ_API_KEY, GROQ_TEXT_MODEL,
     AI_PROVIDER
 )
+from services.fireworks_client import get_fireworks_client
+from services.groq_client import get_groq_client
 
 # Saved keyframes are downscaled to cap artifact size (UHD sources otherwise
 # produce huge JPEGs). Selection/embeddings use the full-quality frame, so this
@@ -82,41 +85,32 @@ def generate_reports_pipeline(
     generate_pdf: bool = True,
     provider: str = AI_PROVIDER
 ):
-    """Run the report generation pipeline."""
+    """Run the report generation pipeline: Fireworks vision + Groq text."""
     from services.fireworks_client import get_fireworks_client
+    from services.groq_client import get_groq_client
     from services.image_analyzer import analyze_keyframe, save_analysis
     from services.scene_aggregator import aggregate_by_scene
     from services.report_generator import generate_all_reports
     from services.report_cache import ReportCache
     from services.pdf_generator import generate_report_pdf
 
-    logger.info(f"=== START Report Generation (provider: {provider}) ===")
+    logger.info("=== START Report Generation (Fireworks vision + Groq text) ===")
 
-    # Initialize client
+    # Initialize vision client (Fireworks) + text client (Groq)
     try:
-        if provider == "gemini":
-            if not GEMINI_API_KEY:
-                logger.error("GEMINI_API_KEY not set in .env")
-                return
-            from services.gemini_client import get_gemini_client
-            client = get_gemini_client()
-            vision_model = GEMINI_VISION_MODEL
-            text_model = GEMINI_TEXT_MODEL
-            logger.info("Using Gemini AI provider")
-        else:
-            if not FIREWORKS_API_KEY:
-                logger.error(
-                    "FIREWORKS_API_KEY not set. Please create a .env file with your key.\n"
-                    "Get yours at: https://fireworks.ai/account/api-keys"
-                )
-                return
-            from services.fireworks_client import get_fireworks_client
-            client = get_fireworks_client()
-            vision_model = FIREWORKS_VISION_MODEL
-            text_model = FIREWORKS_TEXT_MODEL
-            logger.info("Using Fireworks AI provider")
+        if not FIREWORKS_API_KEY:
+            logger.error("FIREWORKS_API_KEY not set in .env")
+            return
+        if not GROQ_API_KEY:
+            logger.error("GROQ_API_KEY not set in .env")
+            return
+        vision_client = get_fireworks_client()
+        text_client = get_groq_client()
+        vision_model = FIREWORKS_VISION_MODEL
+        text_model = GROQ_TEXT_MODEL
+        logger.info(f"Vision: Fireworks ({vision_model}) | Text: Groq ({text_model})")
     except Exception as e:
-        logger.error(f"Failed to initialize {provider} client: {e}")
+        logger.error(f"Failed to initialize clients: {e}")
         return
 
     cache = ReportCache(str(output_dir / "reports"))
@@ -139,7 +133,7 @@ def generate_reports_pipeline(
         try:
             analysis = analyze_keyframe(
                 image_path=keyframe_path,
-                hf_client=client,
+                hf_client=vision_client,
                 model=vision_model,
                 scene_id=sf.scene_id,
                 frame_index=i
@@ -192,7 +186,7 @@ def generate_reports_pipeline(
     for scene_id, scene_data in scene_analyses.items():
         logger.info(f"Processing scene {scene_id}...")
 
-        reports = generate_all_reports(scene_data, client, styles, text_model)
+        reports = generate_all_reports(scene_data, text_client, styles, text_model)
 
         for style, report in reports.items():
             # Cache report
@@ -324,30 +318,23 @@ def generate_captions_for_video(
 ) -> dict[str, str]:
     """
     Generate video-level captions for all requested styles.
-
-    Args:
-        output_dir: Directory containing keyframes
-        selected: List of selected keyframe objects
-        scenes: List of scene objects
-        styles: List of style names to generate
-
-    Returns:
-        Dictionary mapping style to caption text
+    Uses Fireworks vision + Groq text.
     """
     from services.image_analyzer import analyze_keyframe, save_analysis
     from services.scene_aggregator import aggregate_by_scene
     from services.report_generator import generate_video_summary_reports
 
-    if AI_PROVIDER == "gemini":
-        from services.gemini_client import get_gemini_client
-        client = get_gemini_client()
-        vision_model = GEMINI_VISION_MODEL
-        text_model = GEMINI_TEXT_MODEL
-    else:
-        from services.fireworks_client import get_fireworks_client
-        client = get_fireworks_client()
-        vision_model = FIREWORKS_VISION_MODEL
-        text_model = FIREWORKS_TEXT_MODEL
+    if not FIREWORKS_API_KEY:
+        logger.error("FIREWORKS_API_KEY not set in .env")
+        return {}
+    if not GROQ_API_KEY:
+        logger.error("GROQ_API_KEY not set in .env")
+        return {}
+
+    vision_client = get_fireworks_client()
+    text_client = get_groq_client()
+    vision_model = FIREWORKS_VISION_MODEL
+    text_model = GROQ_TEXT_MODEL
 
     # Analyze keyframes
     logger.info(f"Analyzing {len(selected)} keyframes...")
@@ -364,7 +351,7 @@ def generate_captions_for_video(
             analysis = retry_api_call(
                 lambda p=keyframe_path, s=sf, idx=i: analyze_keyframe(
                     image_path=p,
-                    hf_client=client,
+                    hf_client=vision_client,
                     model=vision_model,
                     scene_id=s.scene_id,
                     frame_index=idx
@@ -407,7 +394,7 @@ def generate_captions_for_video(
     # Generate video-level captions
     logger.info(f"Generating {len(styles)} caption styles...")
     captions = retry_api_call(
-        lambda: generate_video_summary_reports(scene_analyses, client, styles, text_model)
+        lambda: generate_video_summary_reports(scene_analyses, text_client, styles, text_model)
     )
 
     # Guarantee all styles have captions

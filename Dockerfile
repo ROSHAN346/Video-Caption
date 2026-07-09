@@ -22,4 +22,4 @@ COPY . .
 
 RUN mkdir -p /input /output
 
-ENTRYPOINT ["python", "main.py"]
+ENTRYPOINT ["python", "-c", "from main import competition_main; competition_main()"]

@@ -13,8 +13,11 @@ class GroqClient:
         self.client = OpenAI(api_key=api_key, base_url=base_url)
         logger.info(f"GroqClient initialized: {base_url}")
 
-    def generate_text(self, prompt: str, model: str, max_tokens: int = 1024) -> str:
-        messages = [{"role": "user", "content": prompt}]
+    def generate_text(self, prompt: str, model: str, system_prompt: str = None, max_tokens: int = 1024) -> str:
+        messages = []
+        if system_prompt:
+            messages.append({"role": "system", "content": system_prompt})
+        messages.append({"role": "user", "content": prompt})
         r = self.client.chat.completions.create(model=model, messages=messages, max_tokens=max_tokens)
         return r.choices[0].message.content or ""
 
