@@ -1,0 +1,29 @@
+[
+  {
+    "task_id": "urban_autumn_boulevard",
+    "captions": {
+      "formal": "The video analysis depicts a bustling urban street scene during the golden hour. The scene features tall apartment buildings and vibrant yellow ginkgo trees. Traffic flows continuously through the intersection.",
+      "sarcastic": "Oh great, another exciting video of cars moving on a street. The golden hour lighting is just so thrilling. The trees are yellow, wow.",
+      "humorous_tech": "Get ready for some high-octane action - cars are moving at lightning speeds of up to 30 km/h! The time-lapse effect is so cool, it's like a real-life video game.",
+      "humorous_non_tech": "Who needs a movie when you have a video of a busy street? The suspense is killing me - will the cars make it through the intersection?"
+    }
+  },
+  {
+    "task_id": "garden_kitten",
+    "captions": {
+      "formal": "The video analysis features an orange tabby kitten in a natural setting, showcasing its curious nature. The kitten navigates through leafy branches, maintaining a steady gaze towards the viewer. Its movements are cautious and deliberate.",
+      "sarcastic": "Oh great, a video of a kitten looking cute, how original. The orange tabby kitten is just standing there, looking at the camera, and somehow it's fascinating. What a unique and not-at-all-overdone subject.",
+      "humorous_tech": "The kitten's advanced navigation system is on full display as it expertly avoids low-hanging branches. With its state-of-the-art whisker sensors and purr-fectly calibrated paws, this little ball of fluff is the ultimate tech demo. The kitten's AI-powered gaze is fixed on the camera.",
+      "humorous_non_tech": "This little furball is just trying to get to the snack bar, but the leafy obstacles keep getting in the way. The orange tabby kitten is on a mission, navigating through the jungle of branches with determination in its eyes. Who needs catnip when you have a sunny dirt path?"
+    }
+  },
+  {
+    "task_id": "office_worker",
+    "captions": {
+      "formal": "The video analysis focuses on a young Black woman working at a computer in a modern office environment. She is seated at a white desk, typing on a keyboard and looking at a monitor. The setting features distinctive circular ceiling lights and a leafy green plant.",
+      "sarcastic": "Oh great, another thrilling video of a woman typing away at her desk. She's really living her best life in this modern office space with a fancy computer monitor and a plant that's probably seen more excitement than she has.",
+      "humorous_tech": "Meet the ultimate tech superstar - a woman who can type and stare at a screen like a pro. Her keyboard skills are on point, and her monitor-gazing abilities are unmatched. She's the real MVP of this modern office.",
+      "humorous_non_tech": "This woman is crushing it in the office, folks. She's got her coffee (not shown), her comfy chair, and her trusty computer. She's basically a rockstar, minus the sold-out tours and adoring fans. Just another day at the office for this working queen."
+    }
+  }
+]
