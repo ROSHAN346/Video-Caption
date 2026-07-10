@@ -1,10 +1,71 @@
 from dataclasses import dataclass
 import logging
 
-from scenedetect import open_video, SceneManager, AdaptiveDetector
+from scenedetect import SceneManager, AdaptiveDetector
+from scenedetect.video_stream import VideoStream
+from scenedetect.frame_timecode import FrameTimecode
 from config import DETECTOR_CONFIG
+from services.proxy_stream import ProxyStream
 
 logger = logging.getLogger(__name__)
+
+class MemoryVideoStream(VideoStream):
+    def __init__(self, proxy: ProxyStream):
+        self.proxy = proxy
+        self.pos = 0
+        self._base = FrameTimecode(timecode=0, fps=self.proxy.fps)
+
+    @property
+    def frame_rate(self): return self.proxy.fps
+    
+    @property
+    def base_timecode(self): return self._base
+
+    @property
+    def position(self): return FrameTimecode(timecode=self.pos, fps=self.proxy.fps)
+    
+    @property
+    def position_ms(self): return (self.pos / self.proxy.fps) * 1000.0
+    
+    @property
+    def frame_number(self): return self.pos
+    
+    @property
+    def aspect_ratio(self): return 1.0
+    
+    @property
+    def duration(self): return FrameTimecode(timecode=len(self.proxy.frames), fps=self.proxy.fps)
+    
+    @property
+    def is_seekable(self): return True
+    
+    @property
+    def frame_size(self): return (self.proxy.width, self.proxy.height)
+    
+    @property
+    def name(self): return "memory_stream"
+    
+    @property
+    def path(self): return self.proxy.video_path
+
+    def read(self, decode=True):
+        if self.pos < len(self.proxy.frames):
+            frame = self.proxy.frames[self.pos]
+            self.pos += 1
+            return frame if decode else True
+        return False
+
+    def reset(self): 
+        self.pos = 0
+
+    def seek(self, target):
+        if isinstance(target, FrameTimecode):
+            self.pos = target.frame_num
+        elif isinstance(target, int):
+            self.pos = target
+        elif isinstance(target, float):
+            self.pos = int(target * self.proxy.fps)
+
 
 
 @dataclass
@@ -17,10 +78,12 @@ class Scene:
     duration: float
 
 
-def detect_scenes(video_path: str) -> list[Scene]:
+def detect_scenes(proxy: ProxyStream) -> list[Scene]:
     logger.info(f"[scenes] detector config: {DETECTOR_CONFIG}")
-    video = open_video(video_path)
+    video = MemoryVideoStream(proxy)
     scene_manager = SceneManager()
+    scene_manager.auto_downscale = False
+    scene_manager.downscale = 1
     scene_manager.add_detector(AdaptiveDetector(
         adaptive_threshold=DETECTOR_CONFIG["adaptive_threshold"],
         min_scene_len=DETECTOR_CONFIG["min_scene_len"],

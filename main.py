@@ -12,6 +12,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from scene_detector import detect_scenes
 from frame_selector import select_keyframes
+from services.proxy_stream import ProxyStream
 from config import (
     REPORT_STYLES, FIREWORKS_API_KEY, FIREWORKS_VISION_MODEL,
     GROQ_API_KEY, GROQ_TEXT_MODEL
@@ -30,7 +31,7 @@ def _downscale_to_max_side(frame: "cv2.typing.MatLike") -> "cv2.typing.MatLike":
     return cv2.resize(frame, (int(round(w * scale)), int(round(h * scale))),
                       interpolation=cv2.INTER_AREA)
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(message)s", datefmt="%H:%M:%S")
+logging.basicConfig(level=logging.WARNING, format="%(asctime)s | %(message)s", datefmt="%H:%M:%S")
 logger = logging.getLogger(__name__)
 
 def parse_args():
@@ -89,31 +90,29 @@ def download_video(url: str, timeout: int = 120) -> str:
 
 
 def retry_api_call(func, max_retries: int = 3, base_delay: float = 5.0):
-    """
-    Retry an API call with exponential backoff.
-
-    Args:
-        func: Callable to execute
-        max_retries: Maximum number of retry attempts
-        base_delay: Base delay in seconds (doubles each retry)
-
-    Returns:
-        Result of func() or None if all retries fail
-    """
+    status_codes = []
     for attempt in range(max_retries):
         try:
-            return func()
+            res = func()
+            status_codes.append(200)
+            return res, status_codes
         except Exception as e:
-            error_str = str(e)
-            if "429" in error_str or "rate" in error_str.lower():
+            code = 500
+            if hasattr(e, "status_code"):
+                code = e.status_code
+            elif "429" in str(e) or "rate" in str(e).lower():
+                code = 429
+            status_codes.append(code)
+            
+            if code == 429:
                 delay = base_delay * (2 ** attempt)
                 logger.warning(f"Rate limited (attempt {attempt + 1}/{max_retries}). Retrying in {delay:.0f}s...")
                 time.sleep(delay)
             else:
                 logger.error(f"API call failed: {e}")
-                return None
+                return None, status_codes
     logger.error(f"API call failed after {max_retries} retries")
-    return None
+    return None, status_codes
 
 
 def generate_captions_for_video(
@@ -155,13 +154,15 @@ def generate_captions_for_video(
     # 1. Single Multi-Image API call to analyze the whole video chronologically
     logger.info(f"Analyzing causal sequence of {len(image_paths)} keyframes...")
     
-    analysis = retry_api_call(
+    vlm_start = time.time()
+    analysis, vlm_codes = retry_api_call(
         lambda: analyze_keyframes_causal(
             image_paths=image_paths,
             client=vision_client,
             model=vision_model
         )
     )
+    vlm_time = time.time() - vlm_start
 
     if not analysis or analysis.get("summary") in ["Analysis unavailable", "Analysis failed to parse", ""]:
         logger.warning("Multi-image API analysis failed. Using fallback.")
@@ -180,9 +181,11 @@ def generate_captions_for_video(
 
     # 3. Generate video-level captions using Groq
     logger.info(f"Generating {len(styles)} caption styles...")
-    captions = retry_api_call(
+    llm_start = time.time()
+    captions, llm_codes = retry_api_call(
         lambda: generate_video_summary_reports(scene_analyses, text_client, styles, text_model)
     )
+    llm_time = time.time() - llm_start
 
     # Guarantee all styles have captions
     if not captions:
@@ -191,7 +194,12 @@ def generate_captions_for_video(
         if style not in captions or not captions[style]:
             captions[style] = f"Video content analyzed: {', '.join(s.get('activities', 'unknown') for s in scene_analyses.values())}"
 
-    return captions
+    return captions, {
+        "vlm_time": vlm_time,
+        "vlm_codes": vlm_codes,
+        "llm_time": llm_time,
+        "llm_codes": llm_codes
+    }
 
 
 def competition_main(input_path=None, output_path=None):
@@ -242,73 +250,135 @@ def competition_main(input_path=None, output_path=None):
         return mapped
 
     results = []
+    stats_list = []
+    frame_stats_list = []
     total_start = time.time()
 
-    for task in tasks:
+    def process_task(task):
         task_id = task["task_id"]
         video_url = task["video_url"]
         requested_styles = task.get("styles", REPORT_STYLES)
         styles = map_styles(requested_styles)
-
+        
         logger.info(f"=== Processing task {task_id} ===")
-        logger.info(f"Styles: {requested_styles} -> {styles}")
         task_start = time.time()
-
+        
         try:
-            # Download video
+            # Download
+            t0 = time.time()
             video_path = download_video(video_url)
+            download_time = time.time() - t0
+            
+            # Scene Detect
+            t0 = time.time()
+            proxy = ProxyStream(video_path, proxy_side=360)
+            scenes = detect_scenes(proxy)
+            scene_time = time.time() - t0
+            
+            # Select
+            t0 = time.time()
+            selected, f_stats = select_keyframes(proxy, scenes)
+            frame_time = time.time() - t0
 
-            # Run pipeline
-            scenes = detect_scenes(video_path)
-            logger.info(f"Task {task_id}: Found {len(scenes)} scenes")
-
-            selected = select_keyframes(video_path, scenes)
-            logger.info(f"Task {task_id}: Selected {len(selected)} keyframes")
-
-            # Save keyframes to temp dir
+            # Generate captions
             output_dir = Path(tempfile.mkdtemp(prefix=f"task_{task_id}_"))
             output_dir.mkdir(parents=True, exist_ok=True)
-
-            analysis_dir = output_dir / "analysis"
-            analysis_dir.mkdir(parents=True, exist_ok=True)
 
             for i, sf in enumerate(selected):
                 filepath = output_dir / f"keyframe_{i:03d}.jpg"
                 cv2.imwrite(str(filepath), _downscale_to_max_side(sf.image))
 
-            # Generate captions
-            captions = generate_captions_for_video(output_dir, selected, scenes, styles)
+            captions, api_stats = generate_captions_for_video(output_dir, selected, scenes, styles)
 
-            # Cleanup temp video
+            # Cleanup
             try:
                 os.unlink(video_path)
             except OSError:
                 pass
 
             task_time = time.time() - task_start
-            logger.info(f"Task {task_id} completed in {task_time:.1f}s")
 
-            results.append({
+            res_dict = {
                 "task_id": task_id,
                 "captions": captions
-            })
+            }
+            
+            stat_dict = {
+                "Task": task_id,
+                "DL(s)": f"{download_time:.1f}",
+                "Scene(s)": f"{scene_time:.1f}",
+                "Sel(s)": f"{frame_time:.1f}",
+                "VLM(s)": f"{api_stats['vlm_time']:.1f}",
+                "VLM_Codes": str(api_stats['vlm_codes']),
+                "LLM(s)": f"{api_stats['llm_time']:.1f}",
+                "LLM_Codes": str(api_stats['llm_codes']),
+                "Total(s)": f"{task_time:.1f}"
+            }
+            
+            f_stat_dict = {
+                "Task": task_id,
+                "Candidates": f_stats["candidates"],
+                "Read": f_stats["read"],
+                "Pruned(read)": f_stats["pruned_read"],
+                "Pruned(sim)": f_stats["pruned_sim"],
+                "Selected": f_stats["selected"]
+            }
+            return res_dict, stat_dict, f_stat_dict
 
         except Exception as e:
             logger.error(f"Task {task_id} failed: {e}")
-            # Still include task with placeholder captions to avoid zero score
-            results.append({
+            res_dict = {
                 "task_id": task_id,
                 "captions": {style: f"Processing failed for this video clip." for style in styles}
-            })
+            }
+            stat_dict = {
+                "Task": task_id,
+                "DL(s)": "-", "Scene(s)": "-", "Sel(s)": "-", 
+                "VLM(s)": "-", "VLM_Codes": "-", 
+                "LLM(s)": "-", "LLM_Codes": "-",
+                "Total(s)": "ERROR"
+            }
+            f_stat_dict = {
+                "Task": task_id,
+                "Candidates": "-", "Read": "-", "Pruned(read)": "-", "Pruned(sim)": "-", "Selected": "-"
+            }
+            return res_dict, stat_dict, f_stat_dict
+
+    # Run all tasks concurrently
+    with ThreadPoolExecutor(max_workers=min(len(tasks), 10)) as executor:
+        futures = [executor.submit(process_task, task) for task in tasks]
+        
+        for future in as_completed(futures):
+            res_dict, stat_dict, f_stat_dict = future.result()
+            results.append(res_dict)
+            stats_list.append(stat_dict)
+            frame_stats_list.append(f_stat_dict)
 
     # Write output
     output_path.parent.mkdir(parents=True, exist_ok=True)
     with open(output_path, "w") as f:
         json.dump(results, f, indent=2)
 
-    total_time = time.time() - total_start
-    logger.info(f"All tasks completed in {total_time:.1f}s")
-    logger.info(f"Results written to {output_path}")
+    # Print nice tables
+    print("\n" + "="*95)
+    print(" TIMING & RESPONSE CODE STATISTICS ".center(95, "="))
+    print("="*95)
+    print(f"{'Task':<20} | {'DL(s)':<6} | {'Scene(s)':<8} | {'Sel(s)':<6} | {'VLM(s)':<6} | {'VLM_Codes':<10} | {'LLM(s)':<6} | {'LLM_Codes':<10} | {'Total(s)':<8}")
+    print("-" * 95)
+    for s in stats_list:
+        print(f"{s['Task']:<20} | {s['DL(s)']:<6} | {s['Scene(s)']:<8} | {s['Sel(s)']:<6} | {s['VLM(s)']:<6} | {s['VLM_Codes']:<10} | {s['LLM(s)']:<6} | {s['LLM_Codes']:<10} | {s['Total(s)']:<8}")
+    print("="*95 + "\n")
+
+    print("\n" + "="*80)
+    print(" FRAME FILTERING & SELECTION STATISTICS ".center(80, "="))
+    print("="*80)
+    print(f"{'Task':<20} | {'Candidates':<10} | {'Read':<6} | {'Pruned (I/O)':<12} | {'Pruned (Sim)':<12} | {'Selected':<8}")
+    print("-" * 80)
+    for fs in frame_stats_list:
+        print(f"{fs['Task']:<20} | {fs['Candidates']:<10} | {fs['Read']:<6} | {fs['Pruned(read)']:<12} | {fs['Pruned(sim)']:<12} | {fs['Selected']:<8}")
+    print("="*80 + "\n")
+
+    print(f"Results written to {output_path}")
     sys.exit(0)
 
 

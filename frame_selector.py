@@ -6,8 +6,8 @@ import cv2
 import numpy as np
 
 from config import MAX_FRAMES, CANDIDATE_FPS, EMBEDDING_BATCH_SIZE, EARLY_STOP_MIN_DIST
-from frame_sampler import seek_and_read
 from frame_embedder import embed_frames
+from services.proxy_stream import ProxyStream
 
 logger = logging.getLogger(__name__)
 
@@ -69,39 +69,38 @@ def _farthest_point_selection(embeddings: np.ndarray, budget: int, min_dist_thre
     
     while len(selected) < budget:
         nxt = int(np.argmax(min_dist))
-        best_dist = float(min_dist[nxt])
-        if min_dist_threshold > 0.0 and best_dist < min_dist_threshold and len(selected) >= 1:
+        best_euclidean = float(min_dist[nxt])
+        
+        # Convert Euclidean distance of unit-norm vectors back to Cosine distance
+        # Euclidean = sqrt(2 * (1 - cos_sim)) -> Cosine Dist = 1 - cos_sim = (Euclidean^2) / 2
+        best_cosine = 0.5 * (best_euclidean ** 2)
+        
+        if min_dist_threshold > 0.0 and best_cosine < min_dist_threshold and len(selected) >= 1:
             logger.info(
-                f"[select] early-stop: next max-min dist={best_dist:.4f} < "
+                f"[select] early-stop: next max-min cosine_dist={best_cosine:.4f} < "
                 f"threshold={min_dist_threshold:.4f} -> keeping {len(selected)} diverse frame(s)"
             )
             break
+            
         selected.append(nxt)
         new_dist = np.linalg.norm(embeddings - embeddings[nxt], axis=1)
         min_dist = np.minimum(min_dist, new_dist)
         logger.info(
-            f"[select] picked idx={nxt} | max-min dist={best_dist:.4f} | "
+            f"[select] picked idx={nxt} | max-min cosine_dist={best_cosine:.4f} | "
             f"selected={len(selected)}/{budget}"
         )
+        
     return selected
 
 
-def select_keyframes(video_path: str, scenes: list) -> list:
+def select_keyframes(proxy: ProxyStream, scenes: list) -> tuple[list, dict]:
     """Select the smallest good set of representative keyframes for a video.
 
-    Single clean entry point so a later orchestrator (captioning/styling/Docker)
-    can call this without knowing the internals. Candidates are pooled across the
-    WHOLE video before embedding + selection, so both a single-scene clip and a
-    20-scene clip bottom out at the same MAX_FRAMES ceiling.
-
-    Returns SelectedFrame objects (temporally ordered) with frame_index,
-    timestamp_sec, scene_id, novelty_score, and the BGR image itself.
+    Returns:
+        tuple of (SelectedFrame list, frame_stats dict)
     """
     t0 = time.time()
-    cap = cv2.VideoCapture(video_path)
-    if not cap.isOpened():
-        raise RuntimeError(f"Cannot open video: {video_path}")
-    video_fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
+    video_fps = proxy.fps
     logger.info(f"[selector] video_fps={video_fps:.3f} | CANDIDATE_FPS={CANDIDATE_FPS} | MAX_FRAMES={MAX_FRAMES}")
 
     # 1. Build the global candidate pool (scene start/end always included).
@@ -130,21 +129,20 @@ def select_keyframes(video_path: str, scenes: list) -> list:
         f"across {len(scenes)} scene(s)"
     )
 
-    # 2. Read all candidate frames (one open capture, reused seek logic).
+    # 2. Read all candidate frames from the in-memory proxy stream.
     images = []
     valid = []
     for c in candidates:
-        frame = seek_and_read(cap, c["frame_index"])
+        frame = proxy.get_frame(c["frame_index"])
         if frame is not None:
             images.append(frame)
             valid.append(c)
-    cap.release()
     skipped = len(candidates) - len(images)
-    logger.info(f"[selector] read {len(images)} candidate frames ({skipped} seeks failed)")
+    logger.info(f"[selector] read {len(images)} candidate frames from proxy ({skipped} out-of-bounds)")
 
     if not images:
         logger.warning("[selector] no candidate frames read -> returning empty")
-        return []
+        return [], {"candidates": len(candidates), "read": 0, "selected": 0, "pruned_read": skipped, "pruned_sim": len(candidates)}
 
     # 3. Embed the entire pooled candidate set in one batched pass.
     t_emb = time.time()
@@ -204,16 +202,32 @@ def select_keyframes(video_path: str, scenes: list) -> list:
     result = []
     for idx in sorted(selected_idx):
         c = valid[idx]
+        
+        # Decode the full-resolution frame for the selected timestamp
+        full_res_image = proxy.get_full_res_frame(c["frame_index"])
+        if full_res_image is None:
+            logger.warning(f"[selector] Failed to extract full-res for frame {c['frame_index']}. Using proxy.")
+            full_res_image = images[idx]
+            
         result.append(SelectedFrame(
             frame_index=c["frame_index"],
             timestamp_sec=c["timestamp_sec"],
             scene_id=c["scene_id"],
             novelty_score=novelty[idx],
-            image=images[idx],
+            image=full_res_image,
         ))
 
     logger.info(
-        f"✅ [selector] DONE: {len(result)} keyframes selected in {time.time() - t0:.2f}s "
-        f"(global ceiling respected: {len(result)} <= {MAX_FRAMES})"
+        f"[selector] done in {time.time()-t0:.1f}s. "
+        f"Selected {len(result)}/{len(images)} valid frames."
     )
-    return result
+    
+    frame_stats = {
+        "candidates": len(candidates),
+        "read": len(images),
+        "selected": len(result),
+        "pruned_read": skipped,
+        "pruned_sim": len(images) - len(result)
+    }
+
+    return result, frame_stats
