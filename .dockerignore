@@ -1,0 +1,22 @@
+# Secrets - never bake into image
+.env
+.env.*
+
+# Git
+.git
+.gitignore
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.egg-info/
+
+# Dev/test artifacts
+result.json
+task.json
+
+# IDE
+.vscode/
+.idea/
