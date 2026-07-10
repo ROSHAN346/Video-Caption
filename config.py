@@ -19,7 +19,7 @@ MAX_FRAMES = 15
 # Higher = finer temporal coverage (smaller chance of missing a brief event),
 # at the cost of more embedding work. Bumped from 2.5 -> 5.0 to shrink the
 # fixed-rate sampling blind spot for short/rare occurrences.
-CANDIDATE_FPS = 5.0
+CANDIDATE_FPS = 2.5
 # CLIP model variant. ViT-B/32 is the lightest reasonable option for CPU inference.
 CLIP_MODEL_NAME = "ViT-B/32"
 # Frames embedded per forward pass (kept modest for 16GB / no-GPU machines).

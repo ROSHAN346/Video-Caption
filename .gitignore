@@ -43,5 +43,5 @@ frames/
 .DS_Store
 Thumbs.db
 
-.md
+*.md
 .dockerignore
