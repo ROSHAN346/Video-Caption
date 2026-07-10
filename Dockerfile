@@ -15,10 +15,16 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy source code
 COPY run_agent.py .
-COPY app.py .
+
+# Embed API credentials at build time (hackathon spec: "use your own credentials inside the container")
+# Build with: docker build --build-arg FIREWORKS_API_KEY=xxx --build-arg GROQ_API_KEY=xxx .
+ARG FIREWORKS_API_KEY
+ARG GROQ_API_KEY
+ENV FIREWORKS_API_KEY=$FIREWORKS_API_KEY
+ENV GROQ_API_KEY=$GROQ_API_KEY
 
 # Create placeholder directories for evaluation mounts
 RUN mkdir -p /input /output
 
-# Run the agent script by default on container startup
+# Exit 0 on success, non-zero on failure (required by spec)
 ENTRYPOINT ["python", "run_agent.py"]

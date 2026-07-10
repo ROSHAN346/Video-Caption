@@ -1,4 +1,5 @@
 import os
+import sys
 import re
 import json
 import time
@@ -304,40 +305,47 @@ def process_video(task):
         }
 
 def main():
-    # Detect Docker input/output paths first
-    input_file = "/input/task.json" if os.path.exists("/input/task.json") else "task.json"
-    output_file = "/output/result.json" if os.path.exists("/output") or os.path.exists("/output/result.json") else "result.json"
-    
+    # Validate API keys at startup — fail fast with clear error
+    if not FIREWORKS_API_KEY:
+        print("[FATAL] FIREWORKS_API_KEY is not set. Cannot continue.")
+        sys.exit(1)
+    if not GROQ_API_KEY:
+        print("[FATAL] GROQ_API_KEY is not set. Cannot continue.")
+        sys.exit(1)
+
+    # Spec-mandated paths: /input/tasks.json → /output/results.json
+    input_file = "/input/tasks.json" if os.path.exists("/input/tasks.json") else "tasks.json"
+    output_file = "/output/results.json"
+
     if not os.path.exists(input_file):
-        print(f"File {input_file} not found. Please provide it.")
-        return
-        
+        print(f"[FATAL] Input file '{input_file}' not found.")
+        sys.exit(1)
+
     with open(input_file, "r") as f:
         tasks = json.load(f)
-        
+
     results = []
-    
+
     print(f"Starting parallel processing for {len(tasks)} tasks (max 3 at a time)...")
-    
+
     # Process up to 3 videos in parallel
     with ThreadPoolExecutor(max_workers=3) as executor:
-        # Submit all tasks
         future_to_task = {executor.submit(process_video, task): task for task in tasks}
-        
-        # As each task completes, grab its result and free up a worker
+
         for future in as_completed(future_to_task):
             res = future.result()
             results.append(res)
             print(f"✅ Finished task: {res.get('task_id')}")
-            
-    # Ensure output directory exists if running in Docker mount
+
+    # Ensure output directory exists (Docker mounts it but it must exist)
     output_path = Path(output_file)
     output_path.parent.mkdir(parents=True, exist_ok=True)
-            
+
     with open(output_file, "w") as f:
         json.dump(results, f, indent=2)
-        
+
     print(f"Done! Results written to {output_file}")
+    sys.exit(0)
 
 if __name__ == "__main__":
     main()
