@@ -42,3 +42,6 @@ frames/
 # OS
 .DS_Store
 Thumbs.db
+
+.md
+.dockerignore
