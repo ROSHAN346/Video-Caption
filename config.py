@@ -31,32 +31,19 @@ EMBEDDING_BATCH_SIZE = 32
 # content (e.g. a static scene where only 1-2 frames are meaningful).
 EARLY_STOP_MIN_DIST = 0.03
 
-# --- Hugging Face Configuration ---
-HF_API_TOKEN = os.getenv("HF_API_TOKEN", "")
-HF_VISION_MODEL = "MiniMaxAI/MiniMax-M3"
-HF_TEXT_MODEL = "meta-llama/Meta-Llama-3.1-8B-Instruct"
-HF_VISION_PROVIDER = "novita"
-HF_TEXT_PROVIDER = "novita"
-
 # --- Fireworks AI Configuration ---
 FIREWORKS_API_KEY = os.getenv("FIREWORKS_API_KEY", "")
 FIREWORKS_BASE_URL = os.getenv("FIREWORKS_BASE_URL", "https://api.fireworks.ai/inference/v1")
 FIREWORKS_VISION_MODEL = os.getenv("FIREWORKS_VISION_MODEL", "accounts/fireworks/models/minimax-m3")
 FIREWORKS_TEXT_MODEL = os.getenv("FIREWORKS_TEXT_MODEL", "accounts/fireworks/models/gpt-oss-120b")
 
-# --- Gemini AI Configuration (OpenAI-compatible endpoint) ---
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
-GEMINI_BASE_URL = os.getenv("GEMINI_BASE_URL", "https://generativelanguage.googleapis.com/v1beta/openai/")
-GEMINI_VISION_MODEL = os.getenv("GEMINI_VISION_MODEL", "gemini-2.5-flash")
-GEMINI_TEXT_MODEL = os.getenv("GEMINI_TEXT_MODEL", "gemini-2.5-flash")
-
 # --- Groq AI Configuration (text only) ---
 GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
 GROQ_BASE_URL = "https://api.groq.com/openai/v1"
-GROQ_TEXT_MODEL = os.getenv("GROQ_TEXT_MODEL", "openai/gpt-oss-120b")
+GROQ_TEXT_MODEL = os.getenv("GROQ_TEXT_MODEL", "llama-3.3-70b-versatile")
 
 # --- Provider Selection ---
-AI_PROVIDER = os.getenv("AI_PROVIDER", "gemini")
+AI_PROVIDER = os.getenv("AI_PROVIDER", "fireworks")
 
 # --- Report Generation ---
 REPORT_STYLES = [
@@ -65,13 +52,9 @@ REPORT_STYLES = [
     "humorous_tech",
     "humorous_non_tech",
 ]
-DEFAULT_REPORT_STYLE = "formal"
-REPORT_CACHE_ENABLED = True
-REPORT_LANGUAGE = "en"
 
 # --- Scene JSON Schema ---
 SCENE_JSON_FIELDS = [
     "scene_id", "scene_type", "location", "people", "objects",
-    "vehicles", "animals", "activities", "weather", "time_of_day",
-    "environment", "risk_level", "confidence", "summary"
+    "activities", "summary"
 ]

@@ -1,7 +1,7 @@
 """
 Image Analysis Service
 
-Analyzes keyframes using Hugging Face Vision models and produces
+Analyzes keyframes using Vision models and produces
 structured JSON descriptions of each frame.
 """
 
@@ -21,22 +21,25 @@ ANALYSIS_PROMPT = """Analyze this image and return a JSON object with the follow
 - location: (office/street/nature/room/etc. - be specific)
 - people: (count and brief description if visible, "none" if not)
 - objects: (list of main objects visible)
-- vehicles: (list if any, empty list if none)
-- animals: (list if any, empty list if none)
 - activities: (what is happening in the scene)
-- weather: (sunny/cloudy/rainy/indoor-lighting/etc.)
-- time_of_day: (morning/afternoon/evening/night/unknown)
-- environment: (urban/rural/industrial/natural/etc.)
-- risk_level: (low/medium/high with brief reason)
-- confidence: (0.0-1.0 how confident you are in this analysis)
 - summary: (1-2 sentence description of the scene)
+
+Return ONLY valid JSON, no other text, no markdown code blocks."""
+
+MULTI_IMAGE_PROMPT = """Analyze this sequence of chronological keyframes from a video and return a JSON object summarizing the ENTIRE sequence with the following fields:
+- scene_type: (indoor/outdoor/mixed/abstract)
+- location: (office/street/nature/room/etc. - be specific)
+- people: (count and brief description if visible, "none" if not)
+- objects: (list of main objects visible)
+- activities: (describe the chronological sequence of actions and causal events happening across the frames)
+- summary: (2-3 sentence overall summary of what happens in the video clip)
 
 Return ONLY valid JSON, no other text, no markdown code blocks."""
 
 
 def analyze_keyframe(
     image_path: str,
-    hf_client: FireworksClient,
+    client: FireworksClient,
     model: str = None,
     scene_id: int = 0,
     frame_index: int = 0
@@ -46,7 +49,7 @@ def analyze_keyframe(
 
     Args:
         image_path: Path to the keyframe image
-        hf_client: Fireworks client instance
+        client: Fireworks client instance
         model: Vision model to use (uses config default if None)
         scene_id: Scene ID for metadata
         frame_index: Frame index for metadata
@@ -54,8 +57,8 @@ def analyze_keyframe(
     Returns:
         Dictionary with structured analysis
     """
-    from config import FIREWORKS_VISION_MODEL, GEMINI_VISION_MODEL, AI_PROVIDER
-    default_model = GEMINI_VISION_MODEL if AI_PROVIDER == "gemini" else FIREWORKS_VISION_MODEL
+    from config import FIREWORKS_VISION_MODEL
+    default_model = FIREWORKS_VISION_MODEL
     model = model or default_model
     image_path = Path(image_path)
 
@@ -66,7 +69,7 @@ def analyze_keyframe(
     try:
         # Call vision model
         logger.info(f"Calling vision model {model} for frame {frame_index}...")
-        response = hf_client.analyze_image(
+        response = client.analyze_image(
             image_path=str(image_path),
             prompt=ANALYSIS_PROMPT,
             model=model,
@@ -92,7 +95,7 @@ def analyze_keyframe(
 
 def analyze_keyframes_batch(
     image_paths: list[str],
-    hf_client: FireworksClient,
+    client: FireworksClient,
     model: str = None,
     scene_id: int = 0
 ) -> list[dict]:
@@ -101,7 +104,7 @@ def analyze_keyframes_batch(
 
     Args:
         image_paths: List of image paths
-        hf_client: Fireworks client instance
+        client: Fireworks client instance
         model: Vision model to use
         scene_id: Scene ID for metadata
 
@@ -113,7 +116,7 @@ def analyze_keyframes_batch(
     for idx, image_path in enumerate(image_paths):
         analysis = analyze_keyframe(
             image_path=image_path,
-            hf_client=hf_client,
+            client=client,
             model=model,
             scene_id=scene_id,
             frame_index=idx
@@ -121,6 +124,41 @@ def analyze_keyframes_batch(
         analyses.append(analysis)
 
     return analyses
+
+
+def analyze_keyframes_causal(
+    image_paths: list[str],
+    client: FireworksClient,
+    model: str = None
+) -> dict:
+    """
+    Analyze an entire sequence of keyframes in one API call to preserve causality.
+    """
+    from config import FIREWORKS_VISION_MODEL
+    model = model or FIREWORKS_VISION_MODEL
+    
+    if not image_paths:
+        return _empty_analysis(0, 0)
+        
+    try:
+        logger.info(f"Calling vision model {model} for a causal sequence of {len(image_paths)} frames...")
+        response = client.analyze_images_multi(
+            image_paths=image_paths,
+            prompt=MULTI_IMAGE_PROMPT,
+            model=model,
+            max_tokens=1024
+        )
+        
+        analysis = _parse_json_response(response)
+        analysis["scene_id"] = "all"
+        analysis["frame_index"] = 0
+        analysis["image_path"] = "multi-image-sequence"
+        
+        logger.info(f"Analyzed sequence successfully: {analysis.get('summary', 'N/A')[:50]}...")
+        return analysis
+    except Exception as e:
+        logger.warning(f"API failed for multi-image sequence: {e}. Using placeholder.")
+        return _empty_analysis(0, 0)
 
 
 def _parse_json_response(response: str) -> dict:
@@ -160,14 +198,7 @@ def _parse_json_response(response: str) -> dict:
             "location": "unknown",
             "people": "unknown",
             "objects": [],
-            "vehicles": [],
-            "animals": [],
             "activities": "unknown",
-            "weather": "unknown",
-            "time_of_day": "unknown",
-            "environment": "unknown",
-            "risk_level": "unknown",
-            "confidence": 0.0,
             "summary": "Analysis failed to parse"
         }
 
@@ -181,14 +212,7 @@ def _empty_analysis(scene_id: int, frame_index: int) -> dict:
         "location": "unknown",
         "people": "unknown",
         "objects": [],
-        "vehicles": [],
-        "animals": [],
         "activities": "unknown",
-        "weather": "unknown",
-        "time_of_day": "unknown",
-        "environment": "unknown",
-        "risk_level": "unknown",
-        "confidence": 0.0,
         "summary": "Analysis unavailable"
     }
 

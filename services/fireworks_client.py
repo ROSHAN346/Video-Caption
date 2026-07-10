@@ -96,6 +96,47 @@ class FireworksClient:
         logger.debug(f"Image analysis response length: {len(result)} chars")
         return result
 
+    def analyze_images_multi(
+        self,
+        image_paths: list[str],
+        prompt: str,
+        model: str,
+        max_tokens: int = 2048
+    ) -> str:
+        """
+        Send multiple images + prompt to a vision model in a single request.
+        """
+        content = [{"type": "text", "text": prompt}]
+        
+        for image_path_str in image_paths:
+            path = Path(image_path_str)
+            if not path.exists():
+                logger.warning(f"Image not found: {path}")
+                continue
+                
+            with open(path, "rb") as f:
+                image_b64 = base64.b64encode(f.read()).decode("utf-8")
+                
+            suffix = path.suffix.lower()
+            mime_map = {".jpg": "jpeg", ".jpeg": "jpeg", ".png": "png", ".webp": "webp"}
+            mime_type = mime_map.get(suffix, "jpeg")
+            image_url = f"data:image/{mime_type};base64,{image_b64}"
+            
+            content.append({"type": "image_url", "image_url": {"url": image_url}})
+
+        messages = [{"role": "user", "content": content}]
+
+        logger.info(f"Analyzing {len(image_paths)} images with model: {model}")
+        response = self.client.chat.completions.create(
+            model=model,
+            messages=messages,
+            max_tokens=max_tokens
+        )
+
+        result = response.choices[0].message.content
+        logger.debug(f"Multi-image analysis response length: {len(result)} chars")
+        return result
+
     def analyze_image_base64(
         self,
         image_bytes: bytes,

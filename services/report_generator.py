@@ -1,7 +1,7 @@
 """
 Report Generator Service
 
-Generates multi-tone reports using Hugging Face text models.
+Generates multi-tone reports using AI text models.
 """
 
 import logging
@@ -9,6 +9,7 @@ from typing import Optional
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from services.fireworks_client import FireworksClient
+from services.groq_client import GroqClient
 from services.prompt_loader import load_prompt, format_prompt
 
 logger = logging.getLogger(__name__)
@@ -25,7 +26,7 @@ SYSTEM_PROMPTS = {
 def generate_report(
     scene_data: dict,
     style: str,
-    hf_client: FireworksClient,
+    client: GroqClient,
     model: str = None
 ) -> str:
     """
@@ -34,14 +35,14 @@ def generate_report(
     Args:
         scene_data: Aggregated scene analysis
         style: Writing style (formal, sarcastic, etc.)
-        hf_client: Fireworks client instance
+        client: Fireworks client instance
         model: Text model to use
 
     Returns:
         Generated report text
     """
-    from config import FIREWORKS_TEXT_MODEL, GEMINI_TEXT_MODEL, AI_PROVIDER
-    default_model = GEMINI_TEXT_MODEL if AI_PROVIDER == "gemini" else FIREWORKS_TEXT_MODEL
+    from config import GROQ_TEXT_MODEL
+    default_model = GROQ_TEXT_MODEL
     model = model or default_model
 
     # Load and format prompt
@@ -54,11 +55,11 @@ def generate_report(
     # Generate report
     logger.info(f"Generating {style} report for scene {scene_data.get('scene_id')}")
     try:
-        report = hf_client.generate_text(
+        report = client.generate_text(
             prompt=prompt,
             model=model,
             system_prompt=system_prompt,
-            max_tokens=100
+            max_tokens=256
         )
         # Clean up any chain-of-thought reasoning
         report = _clean_report_output(report)
@@ -71,7 +72,7 @@ def generate_report(
 
 def generate_all_reports(
     scene_data: dict,
-    hf_client: FireworksClient,
+    client: GroqClient,
     styles: list[str] = None,
     model: str = None
 ) -> dict[str, str]:
@@ -80,7 +81,7 @@ def generate_all_reports(
 
     Args:
         scene_data: Aggregated scene analysis
-        hf_client: Fireworks client instance
+        client: Fireworks client instance
         styles: List of styles to generate (None = all)
         model: Text model to use
 
@@ -94,7 +95,7 @@ def generate_all_reports(
 
     def _gen_one(style):
         try:
-            report = generate_report(scene_data, style, hf_client, model)
+            report = generate_report(scene_data, style, client, model)
             return style, report
         except Exception as e:
             logger.error(f"Error generating {style} report: {e}")
@@ -129,18 +130,15 @@ def _clean_report_output(report: str) -> str:
 
     report = report.strip()
 
-    # For reasoning models, the actual answer is at the very end
-    # Split into sentences and take last 2
+    # Remove <think> or <thought> blocks if they exist (DeepSeek/similar)
     import re
-    sentences = re.split(r'(?<=[.!?])\s+', report)
-
-    # Take last 2 sentences (the actual answer for reasoning models)
-    if len(sentences) >= 2:
-        result = " ".join(sentences[-2:])
-    elif sentences:
-        result = sentences[-1]
-    else:
-        result = report
+    report = re.sub(r'<think>.*?</think>', '', report, flags=re.DOTALL)
+    report = re.sub(r'<thought>.*?</thought>', '', report, flags=re.DOTALL)
+    
+    result = report.strip()
+    
+    if not result:
+        return "No content generated."
 
     # Final cleanup: ensure reasonable length
     if len(result) > 300:
@@ -196,7 +194,7 @@ def aggregate_activities(scene_analyses: dict) -> str:
 
 def generate_video_summary_reports(
     scene_analyses: dict,
-    hf_client: FireworksClient,
+    client: GroqClient,
     styles: list[str] = None,
     model: str = None
 ) -> dict[str, str]:
@@ -205,7 +203,7 @@ def generate_video_summary_reports(
 
     Args:
         scene_analyses: Dictionary mapping scene_id to scene analysis data
-        hf_client: Fireworks client instance
+        client: Fireworks client instance
         styles: List of styles to generate (None = all)
         model: Text model to use
 
@@ -236,7 +234,7 @@ def generate_video_summary_reports(
 
     def _gen_one(style):
         try:
-            report = generate_report(combined_data, style, hf_client, model)
+            report = generate_report(combined_data, style, client, model)
             return style, report
         except Exception as e:
             logger.error(f"Error generating {style} report: {e}")

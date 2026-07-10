@@ -50,20 +50,23 @@ def _farthest_point_selection(embeddings: np.ndarray, budget: int, min_dist_thre
     Works in euclidean space; with unit-norm embeddings this is equivalent to
     maximizing the minimum cosine distance. Seeds with the first candidate for
     determinism. Returns selected indices into the candidate array.
-
-    If `min_dist_threshold > 0`, selection stops early once the next best
-    max-min distance falls below the threshold (remaining candidates are
-    near-duplicates of already-selected frames). This is ADDITIVE to `budget`:
-    the MAX_FRAMES cap still bounds the count from above, this only stops sooner.
     """
     n = len(embeddings)
-    if budget >= n:
+    if n == 0:
+        return []
+        
+    if budget >= n and min_dist_threshold <= 0.0:
         logger.info(f"[select] budget {budget} >= candidates {n} -> keeping ALL candidates")
         return list(range(n))
 
+    budget = min(budget, n)
     selected = [0]
+    if n == 1:
+        return selected
+        
     min_dist = np.linalg.norm(embeddings - embeddings[0], axis=1)
-    logger.info(f"[select] seed candidate idx=0 (t={0:.2f}s)")
+    logger.info(f"[select] seed candidate idx=0")
+    
     while len(selected) < budget:
         nxt = int(np.argmax(min_dist))
         best_dist = float(min_dist[nxt])
@@ -162,10 +165,40 @@ def select_keyframes(video_path: str, scenes: list) -> list:
         f"min={nov_arr.min():.3f} max={nov_arr.max():.3f}"
     )
 
-    # 5. Greedy farthest-point selection, hard-capped at MAX_FRAMES globally.
-    budget = min(MAX_FRAMES, len(embeddings))
-    logger.info(f"[selector] farthest-point budget = min(MAX_FRAMES={MAX_FRAMES}, candidates={len(embeddings)}) = {budget}")
-    selected_idx = _farthest_point_selection(embeddings, budget)
+    # 5. Greedy farthest-point selection, PER SCENE, adaptive budget.
+    scene_to_indices = {}
+    for idx, c in enumerate(valid):
+        scene_to_indices.setdefault(c["scene_id"], []).append(idx)
+        
+    selected_idx = []
+    
+    for scene_id, indices in scene_to_indices.items():
+        if not indices:
+            continue
+            
+        # Distribute MAX_FRAMES proportional to candidate count (duration proxy)
+        weight = len(indices) / len(valid)
+        scene_budget = max(1, int(round(MAX_FRAMES * weight)))
+        scene_budget = min(scene_budget, len(indices))
+        
+        scene_embeddings = embeddings[indices]
+        logger.info(f"[selector] Scene {scene_id} budget={scene_budget} candidates={len(indices)}")
+        
+        # Apply min_dist_threshold to enable early stopping
+        local_selected = _farthest_point_selection(
+            scene_embeddings, 
+            budget=scene_budget, 
+            min_dist_threshold=EARLY_STOP_MIN_DIST
+        )
+        
+        # Map local indices back to global indices
+        for local_idx in local_selected:
+            selected_idx.append(indices[local_idx])
+
+    # Enforce global hard ceiling (trimming from the end is safe enough as a fallback)
+    if len(selected_idx) > MAX_FRAMES:
+        logger.warning(f"[selector] Trimming global excess: {len(selected_idx)} -> {MAX_FRAMES}")
+        selected_idx = selected_idx[:MAX_FRAMES]
 
     # Assemble result in temporal order.
     result = []
