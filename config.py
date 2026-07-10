@@ -29,7 +29,7 @@ EMBEDDING_BATCH_SIZE = 32
 # frames), selection stops early. 0 disables early-stop (always fill MAX_FRAMES).
 # Additive to MAX_FRAMES: never exceeds the cap, only stops sooner on redundant
 # content (e.g. a static scene where only 1-2 frames are meaningful).
-EARLY_STOP_MIN_DIST = 0.03
+EARLY_STOP_MIN_DIST = 0.025
 
 # --- Hugging Face Configuration ---
 HF_API_TOKEN = os.getenv("HF_API_TOKEN", "")

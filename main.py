@@ -413,17 +413,55 @@ def generate_captions_for_video(
     return captions
 
 
+def _resolve_input_path(input_path=None) -> Path:
+    """Locate the competition tasks file inside the container.
+
+    Resolution order:
+      1. Explicit path (must exist, else hard error).
+      2. /input/tasks.json   (convention used by the Dockerfile).
+      3. /input/input.json   (common alternative filename).
+      4. First *.json found in /input (mount-the-whole-folder case).
+
+    This makes the container tolerant of how the host directory is mounted,
+    e.g. `-v ./input:/input` or `-v ./input.json:/input/input.json`.
+    """
+    if input_path:
+        p = Path(input_path)
+        if p.exists():
+            return p
+        logger.error(f"Input file not found: {input_path}")
+        sys.exit(1)
+
+    candidates = [Path("/input/tasks.json"), Path("/input/input.json")]
+    for c in candidates:
+        if c.exists():
+            logger.info(f"Using input file: {c}")
+            return c
+
+    input_dir = Path("/input")
+    if input_dir.is_dir():
+        jsons = sorted(input_dir.glob("*.json"))
+        if jsons:
+            logger.info(f"Using input file: {jsons[0]}")
+            return jsons[0]
+
+    logger.error(
+        "Input file not found. Expected one of: /input/tasks.json, "
+        "/input/input.json, or any *.json inside /input. "
+        "Mount your tasks file/folder to /input (e.g. "
+        "-v ./input:/input or -v ./input.json:/input/tasks.json)."
+    )
+    sys.exit(1)
+
+
 def competition_main(input_path=None, output_path=None):
     """
     Competition entrypoint: read tasks.json, process each task,
     write results.json.
     """
-    input_path = Path(input_path or "/input/tasks.json")
+    input_path = _resolve_input_path(input_path)
     output_path = Path(output_path or "/output/results.json")
-
-    if not input_path.exists():
-        logger.error(f"Input file not found: {input_path}")
-        sys.exit(1)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
 
     with open(input_path) as f:
         tasks = json.load(f)
