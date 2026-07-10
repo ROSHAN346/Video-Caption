@@ -2,28 +2,28 @@
   {
     "task_id": "urban_autumn_boulevard",
     "captions": {
-      "formal": "The video analysis depicts a bustling urban street scene during the golden hour. The scene features tall apartment buildings and vibrant yellow ginkgo trees. Traffic flows continuously through the intersection.",
-      "sarcastic": "Oh great, another exciting video of cars moving on a street. The golden hour lighting is just so thrilling. The trees are yellow, wow.",
-      "humorous_tech": "Get ready for some high-octane action - cars are moving at lightning speeds of up to 30 km/h! The time-lapse effect is so cool, it's like a real-life video game.",
-      "humorous_non_tech": "Who needs a movie when you have a video of a busy street? The suspense is killing me - will the cars make it through the intersection?"
+      "formal": "The video analysis introduces a bustling urban street during autumn, with vibrant yellow foliage and tall residential apartment towers. The street is busy with traffic, including cars and buses. The scene is captured in a time-lapse style.",
+      "sarcastic": "Oh joy, a video of a busy street with cars and trees, how exciting. The autumn foliage is just so captivating, and the traffic is just thrilling. The time-lapse effect is just the cherry on top.",
+      "humorous_tech": "Get ready for some high-octane action, folks, as we dive into this video of a city street with cars moving at lightning-fast speeds of up to 30 miles per hour. The tech behind this time-lapse footage is truly mind-blowing.",
+      "humorous_non_tech": "Who needs action movies when you have a video of a busy street with cars and buses? The suspense is killing me, will the red bus make it to the other side of the road? The autumn leaves are just the icing on the cake."
     }
   },
   {
     "task_id": "garden_kitten",
     "captions": {
-      "formal": "The video analysis features an orange tabby kitten in a natural setting, showcasing its curious nature. The kitten navigates through leafy branches, maintaining a steady gaze towards the viewer. Its movements are cautious and deliberate.",
-      "sarcastic": "Oh great, a video of a kitten looking cute, how original. The orange tabby kitten is just standing there, looking at the camera, and somehow it's fascinating. What a unique and not-at-all-overdone subject.",
-      "humorous_tech": "The kitten's advanced navigation system is on full display as it expertly avoids low-hanging branches. With its state-of-the-art whisker sensors and purr-fectly calibrated paws, this little ball of fluff is the ultimate tech demo. The kitten's AI-powered gaze is fixed on the camera.",
-      "humorous_non_tech": "This little furball is just trying to get to the snack bar, but the leafy obstacles keep getting in the way. The orange tabby kitten is on a mission, navigating through the jungle of branches with determination in its eyes. Who needs catnip when you have a sunny dirt path?"
+      "formal": "The video analysis features an orange tabby kitten walking through a sun-dappled garden. It has distinctive orange fur and bright eyes. The kitten navigates through the leafy environment.",
+      "sarcastic": "Oh great, an orange tabby kitten is walking in a garden, how original. It's got orange fur and is moving forward. What a thrilling video.",
+      "humorous_tech": "Meet the newest robot, an orange tabby kitten, navigating through a garden with ease. Its advanced fur technology blends in with the surroundings. It's a feline AI.",
+      "humorous_non_tech": "This little orange tabby kitten is like a tiny king, ruling over the garden with its cute face and fluffy fur. It's on a secret mission, exploring the leafy kingdom."
     }
   },
   {
     "task_id": "office_worker",
     "captions": {
-      "formal": "The video analysis focuses on a young Black woman working at a computer in a modern office environment. She is seated at a white desk, typing on a keyboard and looking at a monitor. The setting features distinctive circular ceiling lights and a leafy green plant.",
-      "sarcastic": "Oh great, another thrilling video of a woman typing away at her desk. She's really living her best life in this modern office space with a fancy computer monitor and a plant that's probably seen more excitement than she has.",
-      "humorous_tech": "Meet the ultimate tech superstar - a woman who can type and stare at a screen like a pro. Her keyboard skills are on point, and her monitor-gazing abilities are unmatched. She's the real MVP of this modern office.",
-      "humorous_non_tech": "This woman is crushing it in the office, folks. She's got her coffee (not shown), her comfy chair, and her trusty computer. She's basically a rockstar, minus the sold-out tours and adoring fans. Just another day at the office for this working queen."
+      "formal": "A woman is seated at a desk in an office environment, focused on her computer monitor. She is wearing a grey jacket over an orange top and has her hair pulled up in a bun. Her right hand rests near a black computer mouse.",
+      "sarcastic": "Oh great, another thrilling video of a woman staring at a computer screen. She's really living her best life in that office, with her hair in a bun and a grey jacket on.",
+      "humorous_tech": "Tech support alert! A woman is trying to adult at her desk, with a computer monitor, laptop, and tangled headphones. Hopefully, her coding skills are stronger than her cable management.",
+      "humorous_non_tech": "Office life is so exciting! A woman is sitting at her desk, wearing a fancy outfit and trying to look busy. She's got her hair in a bun and a serious face on, but we all know she's probably browsing cat videos."
     }
   }
 ]

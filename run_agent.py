@@ -42,7 +42,7 @@ def extract_and_compress_frames(video_path: str):
     
     uniform_indices = []
     if total_frames > 0:
-        uniform_indices = [int(i) for i in np.linspace(0, total_frames - 1, 10)]
+        uniform_indices = [int(i) for i in np.linspace(0, total_frames - 1, 8)]
         
     cap.release()
     
@@ -62,7 +62,7 @@ def extract_and_compress_frames(video_path: str):
         print(f"[Extract] Scene detection failed: {e}")
         
     # Combine and sort unique indices
-    all_indices = sorted(list(set(uniform_indices + scene_indices)))
+    all_indices = sorted(list(set(uniform_indices + scene_indices)))[:10]
     
     # Extract frames
     cap = cv2.VideoCapture(video_path)
@@ -74,7 +74,7 @@ def extract_and_compress_frames(video_path: str):
         if ret:
             # Compress: resize to max 720p to save bandwidth
             h, w = frame.shape[:2]
-            max_dim = 720
+            max_dim = 512
             if max(h, w) > max_dim:
                 scale = max_dim / max(h, w)
                 frame = cv2.resize(frame, (int(w * scale), int(h * scale)))
@@ -110,7 +110,7 @@ def extract_and_compress_frames(video_path: str):
     
     # Convert frames to base64
     for data in unique_frames:
-        _, buffer = cv2.imencode('.jpg', data["frame"], [cv2.IMWRITE_JPEG_QUALITY, 80])
+        _, buffer = cv2.imencode('.jpg', data["frame"], [cv2.IMWRITE_JPEG_QUALITY, 50])
         data["b64"] = base64.b64encode(buffer).decode('utf-8')
         del data["frame"] # free memory
         
@@ -144,7 +144,7 @@ def analyze_batch_vision(batch, batch_index):
     payload = {
         "model": "accounts/fireworks/models/minimax-m3",
         "messages": [{"role": "user", "content": content}],
-        "max_tokens": 1500
+        "max_tokens": 600
     }
     
     try:
@@ -229,13 +229,20 @@ def generate_tones(vision_summary):
             {"role": "user", "content": f"Video analysis:\n{vision_summary}\n\n"
              "Return JSON with keys: formal, sarcastic, humorous_tech, humorous_non_tech"}
         ],
-        "max_tokens": 1000,
+        "max_tokens": 700,
         "temperature": 0.0
     }
 
     try:
-        resp = requests.post("https://api.groq.com/openai/v1/chat/completions",
-                             headers=headers, json=payload, timeout=60)
+        for _attempt in range(2):
+            resp = requests.post("https://api.groq.com/openai/v1/chat/completions",
+                                 headers=headers, json=payload, timeout=60)
+            if resp.status_code == 429:
+                wait = int(resp.headers.get("Retry-After", 5))
+                print(f"[LLM] Rate limited, retrying in {wait}s...")
+                time.sleep(wait)
+                continue
+            break
         resp.raise_for_status()
         content = (resp.json()["choices"][0]["message"]["content"] or "").strip()
         if not content:
