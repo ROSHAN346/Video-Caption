@@ -30,3 +30,6 @@ ENV/
 # OS
 .DS_Store
 Thumbs.db
+
+# Secrets
+secrets.env
