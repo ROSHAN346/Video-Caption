@@ -1,11 +1,11 @@
 [
   {
-    "task_id": "v1",
+    "task_id": "urban_autumn_boulevard",
     "captions": {
-      "formal": "The video analysis displays a busy urban street scene with multiple lanes and high-rise buildings. The traffic flow is continuous, with vehicles moving in both directions. The scene is set during autumn, with vibrant yellow foliage on the trees.",
-      "sarcastic": "Oh great, another exciting video of cars driving on a road. The traffic is so thrilling, with cars moving at a pace that's just so captivating. The autumn foliage is just the cherry on top of this action-packed scene.",
-      "humorous_tech": "Get ready for some high-octane action - cars are moving at lightning speeds of up to 30 miles per hour! The tech behind this video is mind-blowing, with advanced features like 'cars driving' and 'trees having leaves'.",
-      "humorous_non_tech": "Who needs Hollywood blockbusters when you have cars driving on a road? The suspense is killing me - will the red car pass the blue car? The autumn leaves are just the perfect special effect to keep me on the edge of my seat."
+      "formal": "The video analysis showcases a time-lapse of a busy city street, highlighting the dynamic flow of traffic. The scene features tall apartment buildings and trees with autumn leaves. Vehicles move rapidly, demonstrating the city's energy.",
+      "sarcastic": "Oh joy, a time-lapse of a city street, because that's not something you see every day. Cars move, trees stand still, and the excitement is palpable. The video is a real thrill-ride.",
+      "humorous_tech": "Get ready for some high-octane action, folks, as we watch cars and buses zip by in this time-lapse video. It's like a real-life game of Frogger, but with better graphics. The city street is abuzz with activity.",
+      "humorous_non_tech": "Who needs coffee when you can watch a time-lapse of a busy city street? The cars are zooming, the trees are standing still, and the excitement is contagious. It's like a mini-vacation from your desk."
     }
   }
 ]
