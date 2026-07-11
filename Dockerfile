@@ -16,12 +16,9 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy source code
 COPY run_agent.py .
 
-# Embed API credentials at build time (hackathon spec: "use your own credentials inside the container")
-# Build with: docker build --build-arg FIREWORKS_API_KEY=xxx --build-arg GROQ_API_KEY=xxx .
-ARG FIREWORKS_API_KEY
-ARG GROQ_API_KEY
-ENV FIREWORKS_API_KEY=$FIREWORKS_API_KEY
-ENV GROQ_API_KEY=$GROQ_API_KEY
+# Bake credentials as a plain file (NOT ENV/ARG) so they aren't visible via `docker inspect`
+COPY secrets.env /app/secrets.env
+RUN chmod 600 /app/secrets.env
 
 # Create placeholder directories for evaluation mounts
 RUN mkdir -p /input /output

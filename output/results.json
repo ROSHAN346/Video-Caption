@@ -1,0 +1,11 @@
+[
+  {
+    "task_id": "v1",
+    "captions": {
+      "formal": "The video analysis displays a busy urban street scene with multiple lanes and high-rise buildings. The traffic flow is continuous, with vehicles moving in both directions. The scene is set during autumn, with vibrant yellow foliage on the trees.",
+      "sarcastic": "Oh great, another exciting video of cars driving on a road. The traffic is so thrilling, with cars moving at a pace that's just so captivating. The autumn foliage is just the cherry on top of this action-packed scene.",
+      "humorous_tech": "Get ready for some high-octane action - cars are moving at lightning speeds of up to 30 miles per hour! The tech behind this video is mind-blowing, with advanced features like 'cars driving' and 'trees having leaves'.",
+      "humorous_non_tech": "Who needs Hollywood blockbusters when you have cars driving on a road? The suspense is killing me - will the red car pass the blue car? The autumn leaves are just the perfect special effect to keep me on the edge of my seat."
+    }
+  }
+]
