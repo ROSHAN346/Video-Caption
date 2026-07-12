@@ -1,39 +1,38 @@
-.git
-.gitignore
-__pycache__/
-*.pyc
-*.pyo
-*.pyd
-.env
-.venv/
-venv/
-env/
-.vscode/
-.idea/
-
-input/
-output/
-outputs/
-tmp/
-temp/
-cache/
-.cache/
-.pytest_cache/
-
+# Media artifacts (don't bake into image)
 *.mp4
 *.avi
 *.mov
 *.mkv
 *.webm
-*.zip
-*.tar
-*.gz
+output/
+out/
+results.json
+keyframes.json
 
-*.pt
-*.pth
-*.onnx
-*.bin
+# Docs that aren't needed at runtime
+*.md
+docs/
 
-notebooks/
-tests/
-test/
+# Logs
+*.log
+
+# NOTE: .env is intentionally NOT ignored — the Track 2 judging harness injects
+# no env vars ("use your own credentials inside the container"), so the keys
+# must ship in the image. Use disposable keys with spend caps.
+.env.example
+
+# Python caches
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+
+# Git / IDE
+.git/
+.devcontainer/
+.idea/
+.vscode/
+
+# UI (not part of the container pipeline)
+app.py

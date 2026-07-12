@@ -7,7 +7,6 @@ using OpenAI-compatible API for both vision and text models.
 
 import base64
 import logging
-from pathlib import Path
 from typing import Optional
 
 from openai import OpenAI
@@ -39,62 +38,6 @@ class FireworksClient:
             base_url=base_url
         )
         logger.info(f"FireworksClient initialized with base_url: {base_url}")
-
-    def analyze_image(
-        self,
-        image_path: str,
-        prompt: str,
-        model: str,
-        max_tokens: int = 1024
-    ) -> str:
-        """
-        Send image + prompt to a vision model.
-
-        Args:
-            image_path: Path to the image file
-            prompt: Text prompt for analysis
-            model: Model identifier (e.g., accounts/fireworks/models/llama-v3p2-11b-vision-instruct)
-            max_tokens: Maximum tokens in response
-
-        Returns:
-            Model response text
-        """
-        image_path = Path(image_path)
-        if not image_path.exists():
-            raise FileNotFoundError(f"Image not found: {image_path}")
-
-        # Read and encode image
-        with open(image_path, "rb") as f:
-            image_b64 = base64.b64encode(f.read()).decode("utf-8")
-
-        # Determine image MIME type
-        suffix = image_path.suffix.lower()
-        mime_map = {".jpg": "jpeg", ".jpeg": "jpeg", ".png": "png", ".webp": "webp"}
-        mime_type = mime_map.get(suffix, "jpeg")
-        image_url = f"data:image/{mime_type};base64,{image_b64}"
-
-        # Build message
-        messages = [
-            {
-                "role": "user",
-                "content": [
-                    {"type": "text", "text": prompt},
-                    {"type": "image_url", "image_url": {"url": image_url}}
-                ]
-            }
-        ]
-
-        # Call API
-        logger.info(f"Analyzing image: {image_path.name} with model: {model}")
-        response = self.client.chat.completions.create(
-            model=model,
-            messages=messages,
-            max_tokens=max_tokens
-        )
-
-        result = response.choices[0].message.content
-        logger.debug(f"Image analysis response length: {len(result)} chars")
-        return result
 
     def analyze_image_base64(
         self,
@@ -143,7 +86,7 @@ class FireworksClient:
         prompt: str,
         model: str,
         system_prompt: Optional[str] = None,
-        max_tokens: int = 2048
+        max_tokens: int = 1024
     ) -> str:
         """
         Generate text using a language model.
@@ -155,68 +98,81 @@ class FireworksClient:
             max_tokens: Maximum tokens to generate
 
         Returns:
-            Generated text
+            Generated text (may be empty; callers should treat "" as failure)
         """
         messages = []
-
         if system_prompt:
             messages.append({"role": "system", "content": system_prompt})
-
         messages.append({"role": "user", "content": prompt})
+
+        kwargs = {}
+        # gpt-oss / deepseek-style reasoning models can spend the whole
+        # max_tokens budget on internal reasoning and return EMPTY content
+        # unless the reasoning effort is capped.
+        if "gpt-oss" in model or "qwen3" in model:
+            kwargs["extra_body"] = {"reasoning_effort": "low"}
 
         logger.info(f"Generating text with model: {model}")
         response = self.client.chat.completions.create(
             model=model,
             messages=messages,
-            max_tokens=max_tokens
+            max_tokens=max_tokens,
+            **kwargs
         )
-
-        result = response.choices[0].message.content
-        logger.debug(f"Text generation response length: {len(result)} chars")
-        return result
-
-    def validate_connection(self) -> bool:
-        """
-        Validate the API connection works.
-
-        Returns:
-            True if connection is valid
-        """
-        try:
-            response = self.client.chat.completions.create(
-                model="accounts/fireworks/models/gpt-oss-120b",
-                messages=[{"role": "user", "content": "Hello"}],
-                max_tokens=5
-            )
-            return True
-        except Exception as e:
-            logger.error(f"Connection validation failed: {e}")
-            return False
+        return response.choices[0].message.content or ""
 
 
-# Singleton instance for convenience
-_client_instance: Optional[FireworksClient] = None
+# Singleton instances: one per role so vision and text can use different keys.
+_vision_client: Optional[FireworksClient] = None
+_text_client: Optional[FireworksClient] = None
 
 
 def get_fireworks_client(api_key: str = None, base_url: str = None) -> FireworksClient:
     """
-    Get or create Fireworks client singleton.
+    Get or create the Fireworks VISION client singleton (key #1).
 
     Args:
-        api_key: API key (uses config default if None)
+        api_key: API key (uses config FIREWORKS_API_KEY if None)
         base_url: API base URL (uses config default if None)
 
     Returns:
         FireworksClient instance
     """
-    global _client_instance
+    global _vision_client
 
-    if _client_instance is None:
+    if _vision_client is None:
         from config import FIREWORKS_API_KEY, FIREWORKS_BASE_URL
 
         key = api_key or FIREWORKS_API_KEY
         url = base_url or FIREWORKS_BASE_URL
 
-        _client_instance = FireworksClient(key, url)
+        _vision_client = FireworksClient(key, url)
 
-    return _client_instance
+    return _vision_client
+
+
+def get_fireworks_text_client(api_key: str = None, base_url: str = None) -> FireworksClient:
+    """
+    Get or create the Fireworks TEXT client singleton (key #2).
+
+    Uses FIREWORKS_TEXT_API_KEY, which falls back to FIREWORKS_API_KEY when
+    a second key is not configured.
+
+    Args:
+        api_key: API key (uses config FIREWORKS_TEXT_API_KEY if None)
+        base_url: API base URL (uses config default if None)
+
+    Returns:
+        FireworksClient instance
+    """
+    global _text_client
+
+    if _text_client is None:
+        from config import FIREWORKS_TEXT_API_KEY, FIREWORKS_TEXT_BASE_URL
+
+        key = api_key or FIREWORKS_TEXT_API_KEY
+        url = base_url or FIREWORKS_TEXT_BASE_URL
+
+        _text_client = FireworksClient(key, url)
+
+    return _text_client

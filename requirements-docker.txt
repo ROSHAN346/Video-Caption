@@ -1,8 +1,11 @@
+# Runtime deps for the Docker image (torch/torchvision installed separately
+# in the Dockerfile with the flavor selected by the TORCH_FLAVOR build arg).
 opencv-python-headless>=4.5.0
-numpy>=1.20.0
+numpy>=1.20.0,<2
 Pillow>=8.0.0
-scenedetect>=0.5.0
-clip-anytorch>=2.6.0
+ftfy
+regex
+tqdm
 python-dotenv>=1.0.0
 openai>=1.0.0
 requests>=2.31.0

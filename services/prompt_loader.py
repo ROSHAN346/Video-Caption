@@ -56,8 +56,13 @@ def format_prompt(template: str, scene_data: dict) -> str:
     # Format scene data as readable text
     scene_text = _format_scene_data(scene_data)
 
-    # Replace placeholder
-    formatted = template.replace("{scene_data}", scene_text)
+    # Inject the vision analysis. If the template already has a {scene_data}
+    # placeholder, replace it; otherwise append the analysis so the model
+    # always receives the frame knowledge the vision step produced.
+    if "{scene_data}" in template:
+        formatted = template.replace("{scene_data}", scene_text)
+    else:
+        formatted = f"{template.rstrip()}\n\nBase the caption strictly on the following analysis of the actual video frames:\n{scene_text}"
 
     return formatted
 

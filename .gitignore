@@ -12,14 +12,11 @@ venv/
 
 # Pipeline artifacts
 output/
-
-# Test data
+input/
+out/
+reports/
+downloads/
 frames/
-
-# Output JSON
-*.json
-!sample_tasks.json
-!test_task.json
 
 # Downloaded test videos
 *.mp4
@@ -30,7 +27,6 @@ frames/
 
 # Secrets / local config
 .env
-.env.example
 *.key
 
 # IDE
@@ -42,6 +38,3 @@ frames/
 # OS
 .DS_Store
 Thumbs.db
-
-*.md
-.dockerignore

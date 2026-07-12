@@ -1,0 +1,6 @@
+# Installed with --no-deps to skip heavy transitive deps (e.g. `av` from
+# scenedetect, torch re-pin from clip). Their light runtime deps (numpy,
+# ftfy, regex, tqdm, Pillow) are provided by requirements-docker.txt.
+# Pinned: scene_detector.py drives SceneManager per-frame (0.7.x API).
+scenedetect==0.7.*
+clip-anytorch>=2.6.0

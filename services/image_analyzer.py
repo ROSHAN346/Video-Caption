@@ -1,7 +1,7 @@
 """
 Image Analysis Service
 
-Analyzes keyframes using Hugging Face Vision models and produces
+Analyzes keyframes using the Fireworks vision model and produces
 structured JSON descriptions of each frame.
 """
 
@@ -11,6 +11,7 @@ import re
 from pathlib import Path
 from typing import Optional
 
+import cv2
 from services.fireworks_client import FireworksClient
 
 logger = logging.getLogger(__name__)
@@ -34,93 +35,44 @@ ANALYSIS_PROMPT = """Analyze this image and return a JSON object with the follow
 Return ONLY valid JSON, no other text, no markdown code blocks."""
 
 
-def analyze_keyframe(
-    image_path: str,
+def analyze_keyframe_array(
+    image: "cv2.typing.MatLike",
     hf_client: FireworksClient,
     model: str = None,
     scene_id: int = 0,
     frame_index: int = 0
 ) -> dict:
+    """Analyze a keyframe held in memory (BGR numpy array) without touching disk.
+
+    Encodes the frame to JPEG bytes and calls the vision model directly, skipping
+    the write-JPEG-then-re-read round trip used by analyze_keyframe(image_path=...).
     """
-    Analyze a single keyframe and return structured JSON.
-
-    Args:
-        image_path: Path to the keyframe image
-        hf_client: Fireworks client instance
-        model: Vision model to use (uses config default if None)
-        scene_id: Scene ID for metadata
-        frame_index: Frame index for metadata
-
-    Returns:
-        Dictionary with structured analysis
-    """
-    from config import FIREWORKS_VISION_MODEL, GEMINI_VISION_MODEL, AI_PROVIDER
-    default_model = GEMINI_VISION_MODEL if AI_PROVIDER == "gemini" else FIREWORKS_VISION_MODEL
-    model = model or default_model
-    image_path = Path(image_path)
-
-    if not image_path.exists():
-        logger.error(f"Image not found: {image_path}")
-        return _empty_analysis(scene_id, frame_index)
+    from config import FIREWORKS_VISION_MODEL
+    model = model or FIREWORKS_VISION_MODEL
 
     try:
-        # Call vision model
-        logger.info(f"Calling vision model {model} for frame {frame_index}...")
-        response = hf_client.analyze_image(
-            image_path=str(image_path),
+        ok, buf = cv2.imencode(".jpg", image)
+        if not ok:
+            logger.error(f"Failed to encode frame {frame_index}")
+            return _empty_analysis(scene_id, frame_index)
+
+        logger.info(f"Calling vision model {model} for frame {frame_index} (in-memory)...")
+        response = hf_client.analyze_image_base64(
+            image_bytes=buf.tobytes(),
             prompt=ANALYSIS_PROMPT,
             model=model,
             max_tokens=1024
         )
-        logger.debug(f"Raw response: {response[:200]}...")
 
-        # Parse JSON response
         analysis = _parse_json_response(response)
-
-        # Add metadata
         analysis["scene_id"] = scene_id
         analysis["frame_index"] = frame_index
-        analysis["image_path"] = image_path.name
-
+        analysis["image_path"] = ""
         logger.info(f"Analyzed frame {frame_index} in scene {scene_id}")
         return analysis
-
     except Exception as e:
         logger.warning(f"API failed for frame {frame_index}: {e}. Using placeholder analysis.")
         return _empty_analysis(scene_id, frame_index)
-
-
-def analyze_keyframes_batch(
-    image_paths: list[str],
-    hf_client: FireworksClient,
-    model: str = None,
-    scene_id: int = 0
-) -> list[dict]:
-    """
-    Analyze a batch of keyframes.
-
-    Args:
-        image_paths: List of image paths
-        hf_client: Fireworks client instance
-        model: Vision model to use
-        scene_id: Scene ID for metadata
-
-    Returns:
-        List of analysis dictionaries
-    """
-    analyses = []
-
-    for idx, image_path in enumerate(image_paths):
-        analysis = analyze_keyframe(
-            image_path=image_path,
-            hf_client=hf_client,
-            model=model,
-            scene_id=scene_id,
-            frame_index=idx
-        )
-        analyses.append(analysis)
-
-    return analyses
 
 
 def _parse_json_response(response: str) -> dict:

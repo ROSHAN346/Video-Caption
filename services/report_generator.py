@@ -1,15 +1,17 @@
 """
 Report Generator Service
 
-Generates multi-tone reports using Hugging Face text models.
+Generates multi-tone reports using the Fireworks text model.
 """
 
 import logging
+import time
 from typing import Optional
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from services.fireworks_client import FireworksClient
 from services.prompt_loader import load_prompt, format_prompt
+from services.scene_aggregator import aggregate_scene_analyses
 
 logger = logging.getLogger(__name__)
 
@@ -40,9 +42,8 @@ def generate_report(
     Returns:
         Generated report text
     """
-    from config import FIREWORKS_TEXT_MODEL, GEMINI_TEXT_MODEL, AI_PROVIDER
-    default_model = GEMINI_TEXT_MODEL if AI_PROVIDER == "gemini" else FIREWORKS_TEXT_MODEL
-    model = model or default_model
+    from config import FIREWORKS_TEXT_MODEL
+    model = model or FIREWORKS_TEXT_MODEL
 
     # Load and format prompt
     template = load_prompt(style)
@@ -51,22 +52,37 @@ def generate_report(
     # Get system prompt
     system_prompt = SYSTEM_PROMPTS.get(style)
 
-    # Generate report
+    # Generate report. Reasoning models need headroom beyond the visible
+    # answer (max_tokens also covers reasoning tokens); empty content and
+    # rate limits are retried before falling back to a local template.
     logger.info(f"Generating {style} report for scene {scene_data.get('scene_id')}")
-    try:
-        report = hf_client.generate_text(
-            prompt=prompt,
-            model=model,
-            system_prompt=system_prompt,
-            max_tokens=100
-        )
-        # Clean up any chain-of-thought reasoning
-        report = _clean_report_output(report)
-        logger.info(f"Generated {style} report: {len(report)} chars")
-        return report
-    except Exception as e:
-        logger.warning(f"Text generation failed: {e}. Using local fallback.")
-        return _local_fallback_report(scene_data, style)
+    max_retries = 3
+    for attempt in range(max_retries):
+        try:
+            report = hf_client.generate_text(
+                prompt=prompt,
+                model=model,
+                system_prompt=system_prompt,
+                max_tokens=600
+            )
+            cleaned = _clean_report_output(report)
+            if cleaned:
+                logger.info(f"Generated {style} report: {len(cleaned)} chars")
+                return cleaned
+            logger.warning(
+                f"{style}: model returned empty content "
+                f"(attempt {attempt + 1}/{max_retries}), retrying..."
+            )
+        except Exception as e:
+            err = str(e)
+            if ("429" in err or "rate_limit" in err) and attempt < max_retries - 1:
+                delay = 3.0 * (2 ** attempt)
+                logger.warning(f"{style}: rate limited, retrying in {delay:.0f}s...")
+                time.sleep(delay)
+                continue
+            logger.warning(f"Text generation failed: {e}. Using local fallback.")
+            break
+    return _local_fallback_report(scene_data, style)
 
 
 def generate_all_reports(
@@ -123,30 +139,32 @@ def get_system_prompt(style: str) -> Optional[str]:
 
 
 def _clean_report_output(report: str) -> str:
-    """Strip chain-of-thought reasoning, return only the final 2-line summary."""
+    """Strip chain-of-thought reasoning, return only the final 2-line summary.
+
+    Returns "" for empty input so the caller can treat it as a failure
+    (retry / local fallback) instead of emitting a useless caption.
+    """
     if not report or not report.strip():
-        return "No content generated."
+        return ""
 
     report = report.strip()
 
-    # For reasoning models, the actual answer is at the very end
-    # Split into sentences and take last 2
+    # With reasoning_effort capped, `content` normally holds ONLY the final
+    # answer, so keep it intact. Only if the model leaked a long chain of
+    # thought (many sentences / very long text) do we trim to the final
+    # sentences, which is where reasoning models place the actual answer.
     import re
     sentences = re.split(r'(?<=[.!?])\s+', report)
 
-    # Take last 2 sentences (the actual answer for reasoning models)
-    if len(sentences) >= 2:
-        result = " ".join(sentences[-2:])
-    elif sentences:
-        result = sentences[-1]
-    else:
-        result = report
+    if len(sentences) <= 3 and len(report) <= 400:
+        return report
 
-    # Final cleanup: ensure reasonable length
-    if len(result) > 300:
-        # Take last 300 chars at sentence boundary
-        result = result[-300:]
-        # Find first sentence start
+    # Looks like reasoning leaked: keep the last 2 sentences.
+    result = " ".join(sentences[-2:]) if len(sentences) >= 2 else report
+
+    if len(result) > 400:
+        # Still too long: cut to the last 400 chars at a sentence start.
+        result = result[-400:]
         for i, c in enumerate(result):
             if c.isupper() and i > 0:
                 result = result[i:]
@@ -216,21 +234,25 @@ def generate_video_summary_reports(
 
     styles = styles or REPORT_STYLES
 
-    # Aggregate activities from all scenes
-    activities_summary = aggregate_activities(scene_analyses)
-
-    # Create a combined scene_data dict for the prompt
-    combined_data = {
-        "activities": activities_summary,
-        "summary": activities_summary,
-        "scene_id": "all",
-        "scene_type": "video",
-        "location": "multiple scenes",
-        "objects": [],
-        "weather": "unknown",
-        "time_of_day": "unknown",
-        "environment": "unknown"
-    }
+    # Merge the per-scene aggregated analyses into a single video-level
+    # analysis that carries the REAL vision knowledge (location, objects,
+    # people, weather, per-scene activities/summaries) to the text model.
+    scene_dicts = list(scene_analyses.values())
+    if scene_dicts:
+        combined_data = aggregate_scene_analyses(scene_dicts)
+        combined_data["scene_id"] = "all"
+    else:
+        combined_data = {
+            "activities": aggregate_activities(scene_analyses),
+            "summary": aggregate_activities(scene_analyses),
+            "scene_id": "all",
+            "scene_type": "video",
+            "location": "unknown",
+            "objects": [],
+            "weather": "unknown",
+            "time_of_day": "unknown",
+            "environment": "unknown",
+        }
 
     reports = {}
 

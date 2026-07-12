@@ -6,7 +6,6 @@ import cv2
 import numpy as np
 
 from config import MAX_FRAMES, CANDIDATE_FPS, EMBEDDING_BATCH_SIZE, EARLY_STOP_MIN_DIST
-from frame_sampler import seek_and_read
 from frame_embedder import embed_frames
 
 logger = logging.getLogger(__name__)
@@ -19,29 +18,6 @@ class SelectedFrame:
     scene_id: int
     novelty_score: float
     image: np.ndarray
-
-
-def _candidate_frame_numbers(scene, candidate_fps: float, video_fps: float) -> list:
-    """Frame numbers to consider inside a scene.
-
-    Samples ~candidate_fps across [start_frame, end_frame); always forces the
-    scene start and end frames into the pool as guaranteed candidates.
-    """
-    start = scene.start_frame
-    end = scene.end_frame - 1  # end_frame is exclusive, so last real frame is end-1
-    if end < start:
-        end = start
-
-    step = max(1, int(round(video_fps / candidate_fps)))
-    nums = list(range(start, end + 1, step))
-
-    # Force scene boundaries in regardless of sampling step.
-    if start not in nums:
-        nums.append(start)
-    if end not in nums:
-        nums.append(end)
-
-    return sorted(set(nums))
 
 
 def _farthest_point_selection(embeddings: np.ndarray, budget: int, min_dist_threshold: float = 0.0) -> list:
@@ -83,13 +59,18 @@ def _farthest_point_selection(embeddings: np.ndarray, budget: int, min_dist_thre
     return selected
 
 
-def select_keyframes(video_path: str, scenes: list) -> list:
+def select_keyframes(video_path: str, scenes: list, captured_frames: dict = None) -> list:
     """Select the smallest good set of representative keyframes for a video.
 
     Single clean entry point so a later orchestrator (captioning/styling/Docker)
     can call this without knowing the internals. Candidates are pooled across the
     WHOLE video before embedding + selection, so both a single-scene clip and a
     20-scene clip bottom out at the same MAX_FRAMES ceiling.
+
+    `captured_frames` (optional) is the dict of {frame_index -> BGR ndarray}
+    produced by detect_scenes() during its single decode pass. When supplied,
+    candidate frames are taken directly from memory (no second video decode);
+    only the rare missing index falls back to a targeted cv2 seek.
 
     Returns SelectedFrame objects (temporally ordered) with frame_index,
     timestamp_sec, scene_id, novelty_score, and the BGR image itself.
@@ -99,18 +80,33 @@ def select_keyframes(video_path: str, scenes: list) -> list:
     if not cap.isOpened():
         raise RuntimeError(f"Cannot open video: {video_path}")
     video_fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
-    logger.info(f"[selector] video_fps={video_fps:.3f} | CANDIDATE_FPS={CANDIDATE_FPS} | MAX_FRAMES={MAX_FRAMES}")
+    logger.info(f"[selector] video_fps={video_fps:.3f} | CANDIDATE_FPS={CANDIDATE_FPS} | MAX_FRAMES={MAX_FRAMES} | from_cache={bool(captured_frames)}")
 
-    # 1. Build the global candidate pool (scene start/end always included).
+    step = max(1, int(round(video_fps / CANDIDATE_FPS)))
+    max_idx = max(captured_frames.keys()) if captured_frames else None
+
+    # 1. Build the candidate pool from the SAME uniform grid detect_scenes() used
+    #    (idx % step == 0) plus scene start/end boundaries, so every candidate is
+    #    already present in captured_frames.
     candidates = []
     per_scene_counts = []
     for scene in scenes:
-        cands = _candidate_frame_numbers(scene, CANDIDATE_FPS, video_fps)
+        start = scene.start_frame
+        end = scene.end_frame - 1  # end_frame is exclusive, so last real frame is end-1
+        if max_idx is not None:
+            end = min(end, max_idx)  # guard against off-by-one exclusive end frames
+        if end < start:
+            end = start
+        cands = [i for i in range(start, end + 1) if i % step == 0]
+        for b in (start, end):
+            if b not in cands:
+                cands.append(b)
+        cands = sorted(set(cands))
         per_scene_counts.append(len(cands))
-        for fn in cands:
+        for i in cands:
             candidates.append({
-                "frame_index": fn,
-                "timestamp_sec": fn / video_fps,
+                "frame_index": i,
+                "timestamp_sec": i / video_fps,
                 "scene_id": scene.scene_number,
             })
     # Dedupe by frame index while preserving temporal order.
@@ -127,17 +123,23 @@ def select_keyframes(video_path: str, scenes: list) -> list:
         f"across {len(scenes)} scene(s)"
     )
 
-    # 2. Read all candidate frames (one open capture, reused seek logic).
+    # 2. Resolve candidate images. Prefer in-memory captured frames (no decode);
+    #    fall back to a targeted cv2 seek only if an index is somehow missing.
     images = []
     valid = []
     for c in candidates:
-        frame = seek_and_read(cap, c["frame_index"])
-        if frame is not None:
-            images.append(frame)
-            valid.append(c)
+        idx = c["frame_index"]
+        frame = captured_frames.get(idx) if captured_frames else None
+        if frame is None:
+            cap.set(cv2.CAP_PROP_POS_FRAMES, idx)
+            ret, frame = cap.read()
+            if not ret:
+                continue
+        images.append(frame)
+        valid.append(c)
     cap.release()
     skipped = len(candidates) - len(images)
-    logger.info(f"[selector] read {len(images)} candidate frames ({skipped} seeks failed)")
+    logger.info(f"[selector] resolved {len(images)} candidate frames ({skipped} missing)")
 
     if not images:
         logger.warning("[selector] no candidate frames read -> returning empty")
@@ -165,7 +167,7 @@ def select_keyframes(video_path: str, scenes: list) -> list:
     # 5. Greedy farthest-point selection, hard-capped at MAX_FRAMES globally.
     budget = min(MAX_FRAMES, len(embeddings))
     logger.info(f"[selector] farthest-point budget = min(MAX_FRAMES={MAX_FRAMES}, candidates={len(embeddings)}) = {budget}")
-    selected_idx = _farthest_point_selection(embeddings, budget)
+    selected_idx = _farthest_point_selection(embeddings, budget, EARLY_STOP_MIN_DIST)
 
     # Assemble result in temporal order.
     result = []

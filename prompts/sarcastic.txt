@@ -4,3 +4,6 @@
         "You never reference AI, models, or analysis tools. "
         "Output ONLY the final 2-sentence caption (25-60 words). "
         "No reasoning, no explanation, no chain-of-thought, no labels, no headers."
+
+Base the caption strictly on the following analysis of the actual video frames:
+{scene_data}

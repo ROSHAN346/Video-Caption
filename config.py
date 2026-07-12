@@ -10,68 +10,64 @@ DETECTOR_CONFIG = {
     "min_content_val": 15.0,
 }
 
-FRAME_STRATEGY = "middle"
-
-# --- Embedding-based keyframe selection config (this phase) ---
+# --- Embedding-based keyframe selection config ---
 # Hard ceiling on total selected keyframes for ANY video (single- or multi-scene).
-MAX_FRAMES = 15
+# Kept low to cut embedding work and the number of vision API calls.
+MAX_FRAMES = 5
 # Dense candidate sampling rate inside each scene (frames per second).
-# Higher = finer temporal coverage (smaller chance of missing a brief event),
-# at the cost of more embedding work. Bumped from 2.5 -> 5.0 to shrink the
-# fixed-rate sampling blind spot for short/rare occurrences.
-CANDIDATE_FPS = 2.5
-# CLIP model variant. ViT-B/32 is the lightest reasonable option for CPU inference.
+# Lower = fewer candidate frames to embed (the dominant CPU cost), at the
+# expense of slightly coarser temporal coverage. Set to 0.5 for aggressive
+# CPU speed; coverage remains adequate for most content.
+CANDIDATE_FPS = 0.5
+# CLIP model variant. ViT-B/32 is the lightest reasonable option; the device
+# (CUDA / DirectML / CPU) is auto-selected at runtime in frame_embedder.py.
 CLIP_MODEL_NAME = "ViT-B/32"
 # Frames embedded per forward pass (kept modest for 16GB / no-GPU machines).
-EMBEDDING_BATCH_SIZE = 32
+EMBEDDING_BATCH_SIZE = 16
 # Min max-min embedding distance required to keep adding keyframes. When the next
 # best candidate is closer than this (i.e. near-duplicate of already-selected
 # frames), selection stops early. 0 disables early-stop (always fill MAX_FRAMES).
 # Additive to MAX_FRAMES: never exceeds the cap, only stops sooner on redundant
 # content (e.g. a static scene where only 1-2 frames are meaningful).
-EARLY_STOP_MIN_DIST = 0.025
+EARLY_STOP_MIN_DIST = 0.0075
+# Captured frames (kept in memory during the single decode pass) are downscaled
+# so their longest side never exceeds this. CLIP embeds at 224px and vision-API
+# JPEGs are capped at 1280px anyway, so nothing downstream loses quality while
+# RAM usage on UHD sources drops ~4-10x.
+MAX_CAPTURE_SIDE = 1280
 
-# --- Hugging Face Configuration ---
-HF_API_TOKEN = os.getenv("HF_API_TOKEN", "")
-HF_VISION_MODEL = "MiniMaxAI/MiniMax-M3"
-HF_TEXT_MODEL = "meta-llama/Meta-Llama-3.1-8B-Instruct"
-HF_VISION_PROVIDER = "novita"
-HF_TEXT_PROVIDER = "novita"
+# --- Video download limits (competition/batch mode) ---
+# Hard cap on a single downloaded video to protect the disk.
+MAX_DOWNLOAD_MB = 1024
 
-# --- Fireworks AI Configuration ---
+# --- Competition runtime budget ---
+# Number of tasks processed concurrently (download/decode of one task overlaps
+# the API calls of another). Keep modest for small judge VMs.
+MAX_TASK_WORKERS = int(os.getenv("MAX_TASK_WORKERS", "3"))
+# Global wall-clock budget: the judge kills containers at 10 minutes, so we
+# stop waiting at this point and write results with whatever has completed
+# (unfinished tasks keep their placeholder captions — partial beats TIMEOUT).
+DEADLINE_SECONDS = float(os.getenv("DEADLINE_SECONDS", "510"))
+
+# --- Fireworks AI Configuration (vision) ---
 FIREWORKS_API_KEY = os.getenv("FIREWORKS_API_KEY", "")
 FIREWORKS_BASE_URL = os.getenv("FIREWORKS_BASE_URL", "https://api.fireworks.ai/inference/v1")
 FIREWORKS_VISION_MODEL = os.getenv("FIREWORKS_VISION_MODEL", "accounts/fireworks/models/minimax-m3")
+
+# --- Fireworks AI Configuration (text) ---
+# Separate key so vision and text can run on different Fireworks accounts.
+# Falls back to the vision key when unset.
+FIREWORKS_TEXT_API_KEY = os.getenv("FIREWORKS_TEXT_API_KEY", "") or FIREWORKS_API_KEY
+FIREWORKS_TEXT_BASE_URL = os.getenv("FIREWORKS_TEXT_BASE_URL", FIREWORKS_BASE_URL)
 FIREWORKS_TEXT_MODEL = os.getenv("FIREWORKS_TEXT_MODEL", "accounts/fireworks/models/gpt-oss-120b")
-
-# --- Gemini AI Configuration (OpenAI-compatible endpoint) ---
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
-GEMINI_BASE_URL = os.getenv("GEMINI_BASE_URL", "https://generativelanguage.googleapis.com/v1beta/openai/")
-GEMINI_VISION_MODEL = os.getenv("GEMINI_VISION_MODEL", "gemini-2.5-flash")
-GEMINI_TEXT_MODEL = os.getenv("GEMINI_TEXT_MODEL", "gemini-2.5-flash")
-
-# --- Groq AI Configuration (text only) ---
-GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
-GROQ_BASE_URL = "https://api.groq.com/openai/v1"
-GROQ_TEXT_MODEL = os.getenv("GROQ_TEXT_MODEL", "openai/gpt-oss-120b")
-
-# --- Provider Selection ---
-AI_PROVIDER = os.getenv("AI_PROVIDER", "gemini")
 
 # --- Report Generation ---
 REPORT_STYLES = [
     "formal",
-    "sarcastic",
-    "humorous_tech",
-    "humorous_non_tech",
 ]
 DEFAULT_REPORT_STYLE = "formal"
 REPORT_CACHE_ENABLED = True
 REPORT_LANGUAGE = "en"
 
 # --- Scene JSON Schema ---
-SCENE_JSON_FIELDS = [
-    "scene_id", "scene_type", "location", "people", "objects",
-    "vehicles", "animals", "activities", "weather", "time_of_day",
-    "environment", "risk_level", "confidence", "summary"
-]
+

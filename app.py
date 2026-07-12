@@ -57,7 +57,7 @@ st.caption("Equivalent CLI: `python main.py --input tasks.json --output results.
 with st.sidebar:
     st.header("⚙️ Configuration")
     output_name = st.text_input("Output filename", value="results.json")
-    python_exe = st.text_input("Python interpreter", value=sys.executable)
+    st.caption(f"Interpreter: `{sys.executable}`")
     st.divider()
     st.markdown("**Expected JSON format** (`tasks.json`):")
     st.code(
@@ -76,7 +76,7 @@ with st.sidebar:
             st.markdown("**🤖 Models in use**")
             model_rows = [
                 ("Vision model (Fireworks)", getattr(cfg, "FIREWORKS_VISION_MODEL", "")),
-                ("Text model (Groq)", getattr(cfg, "GROQ_TEXT_MODEL", "")),
+                ("Text model (Fireworks)", getattr(cfg, "FIREWORKS_TEXT_MODEL", "")),
                 ("CLIP embedding", getattr(cfg, "CLIP_MODEL_NAME", "")),
             ]
             for name, val in model_rows:
@@ -86,7 +86,6 @@ with st.sidebar:
 
             st.markdown("**⚙️ Fine-tuning parameters**")
             param_rows = [
-                ("Frame strategy", getattr(cfg, "FRAME_STRATEGY", "")),
                 ("Max frames (cap)", getattr(cfg, "MAX_FRAMES", "")),
                 ("Candidate FPS", getattr(cfg, "CANDIDATE_FPS", "")),
                 ("Early-stop min dist", getattr(cfg, "EARLY_STOP_MIN_DIST", "")),
@@ -225,7 +224,7 @@ if uploaded is not None:
                 f.write(uploaded.getvalue().decode("utf-8"))
 
             output_path = os.path.join(tmp, output_name)
-            cmd = [python_exe, "main.py", "--input", input_path, "--output", output_path]
+            cmd = [sys.executable, "main.py", "--input", input_path, "--output", output_path]
 
             status = {}
             status_box = st.empty()
@@ -308,7 +307,7 @@ if uploaded is not None:
                 else:
                     st.error(f"Pipeline exited with code {proc.returncode}.")
             except FileNotFoundError:
-                st.error(f"Python interpreter not found: {python_exe}")
+                st.error(f"Python interpreter not found: {sys.executable}")
 else:
     st.markdown("<div class='section-gap'></div>", unsafe_allow_html=True)
     st.info("👆 Upload a tasks JSON file to get started.")

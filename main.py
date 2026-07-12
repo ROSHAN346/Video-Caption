@@ -9,19 +9,21 @@ import tempfile
 import requests
 import cv2
 from pathlib import Path
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import (
+    ThreadPoolExecutor,
+    as_completed,
+    TimeoutError as FuturesTimeoutError,
+)
 
 from scene_detector import detect_scenes
 from frame_selector import select_keyframes
 from config import (
-    FRAME_STRATEGY, MAX_FRAMES, REPORT_STYLES,
-    DEFAULT_REPORT_STYLE, FIREWORKS_API_KEY, FIREWORKS_VISION_MODEL, FIREWORKS_TEXT_MODEL,
-    GEMINI_API_KEY, GEMINI_VISION_MODEL, GEMINI_TEXT_MODEL,
-    GROQ_API_KEY, GROQ_TEXT_MODEL,
-    AI_PROVIDER
+    MAX_FRAMES, REPORT_STYLES,
+    DEFAULT_REPORT_STYLE, FIREWORKS_API_KEY, FIREWORKS_VISION_MODEL,
+    FIREWORKS_TEXT_API_KEY, FIREWORKS_TEXT_MODEL,
+    MAX_DOWNLOAD_MB, MAX_TASK_WORKERS, DEADLINE_SECONDS,
 )
-from services.fireworks_client import get_fireworks_client
-from services.groq_client import get_groq_client
+from services.fireworks_client import get_fireworks_client, get_fireworks_text_client
 
 # Saved keyframes are downscaled to cap artifact size (UHD sources otherwise
 # produce huge JPEGs). Selection/embeddings use the full-quality frame, so this
@@ -75,12 +77,6 @@ def parse_args():
         action="store_true",
         help="Generate reports in all styles"
     )
-    parser.add_argument(
-        "--provider",
-        choices=["fireworks", "gemini"],
-        default=AI_PROVIDER,
-        help=f"AI provider to use (default: {AI_PROVIDER})"
-    )
     return parser.parse_args()
 
 
@@ -89,31 +85,28 @@ def generate_reports_pipeline(
     selected: list,
     scenes: list,
     styles: list[str],
-    provider: str = AI_PROVIDER
 ):
-    """Run the report generation pipeline: Fireworks vision + Groq text."""
-    from services.fireworks_client import get_fireworks_client
-    from services.groq_client import get_groq_client
-    from services.image_analyzer import analyze_keyframe, save_analysis
+    """Run the report generation pipeline: Fireworks vision + Fireworks text."""
+    from services.image_analyzer import analyze_keyframe_array, save_analysis
     from services.scene_aggregator import aggregate_by_scene
     from services.report_generator import generate_all_reports
     from services.report_cache import ReportCache
 
-    logger.info("=== START Report Generation (Fireworks vision + Groq text) ===")
+    logger.info("=== START Report Generation (Fireworks vision + Fireworks text) ===")
 
-    # Initialize vision client (Fireworks) + text client (Groq)
+    # Initialize vision client (Fireworks key #1) + text client (Fireworks key #2)
     try:
         if not FIREWORKS_API_KEY:
             logger.error("FIREWORKS_API_KEY not set in .env")
             return
-        if not GROQ_API_KEY:
-            logger.error("GROQ_API_KEY not set in .env")
+        if not FIREWORKS_TEXT_API_KEY:
+            logger.error("FIREWORKS_TEXT_API_KEY not set in .env")
             return
         vision_client = get_fireworks_client()
-        text_client = get_groq_client()
+        text_client = get_fireworks_text_client()
         vision_model = FIREWORKS_VISION_MODEL
-        text_model = GROQ_TEXT_MODEL
-        logger.info(f"Vision: Fireworks ({vision_model}) | Text: Groq ({text_model})")
+        text_model = FIREWORKS_TEXT_MODEL
+        logger.info(f"Vision: Fireworks ({vision_model}) | Text: Fireworks ({text_model})")
     except Exception as e:
         logger.error(f"Failed to initialize clients: {e}")
         return
@@ -129,13 +122,9 @@ def generate_reports_pipeline(
     analyses = []
 
     def _analyze_keyframe_pipeline(i, sf):
-        keyframe_path = str(output_dir / f"keyframe_{i:03d}.jpg")
-        if not Path(keyframe_path).exists():
-            logger.warning(f"Keyframe not found: {keyframe_path}")
-            return None
         try:
-            analysis = analyze_keyframe(
-                image_path=keyframe_path,
+            analysis = analyze_keyframe_array(
+                image=sf.image,
                 hf_client=vision_client,
                 model=vision_model,
                 scene_id=sf.scene_id,
@@ -202,7 +191,7 @@ def generate_reports_pipeline(
             cache.cache_report(scene_id, style, report, {
                 "vision_model": vision_model,
                 "text_model": text_model,
-                "provider": provider
+                "provider": "fireworks"
             })
 
             # Save markdown report
@@ -248,34 +237,65 @@ def download_video(url: str, timeout: int = 120) -> str:
     """
     Download a video from a URL to a temporary file.
 
+    Enforces a hard size cap (MAX_DOWNLOAD_MB) and rejects obviously
+    non-video responses (HTML error pages, etc.) to protect disk and
+    avoid feeding garbage into the decoder.
+
     Args:
         url: Video URL
-        timeout: Download timeout in seconds
+        timeout: Download timeout in seconds (connect + read)
 
     Returns:
         Path to downloaded video file
     """
+    max_bytes = MAX_DOWNLOAD_MB * 1024 * 1024
     logger.info(f"Downloading video from: {url}")
-    response = requests.get(url, timeout=timeout, stream=True)
+    response = requests.get(url, timeout=(10, timeout), stream=True)
     response.raise_for_status()
 
-    # Determine file extension from URL or content-type
+    content_type = (response.headers.get("Content-Type") or "").lower()
+    if content_type.startswith("text/html"):
+        response.close()
+        raise ValueError(f"URL returned HTML, not a video (Content-Type: {content_type}): {url}")
+
+    declared = response.headers.get("Content-Length")
+    if declared and int(declared) > max_bytes:
+        response.close()
+        raise ValueError(
+            f"Video too large: {int(declared) / 1024 / 1024:.0f} MB > {MAX_DOWNLOAD_MB} MB cap: {url}"
+        )
+
+    # Determine file extension from URL
     suffix = ".mp4"
-    if "?" in url:
-        url_path = url.split("?")[0]
-    else:
-        url_path = url
+    url_path = url.split("?")[0]
     for ext in [".mp4", ".avi", ".mov", ".mkv", ".webm"]:
         if url_path.lower().endswith(ext):
             suffix = ext
             break
 
-    with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp_file:
-        for chunk in response.iter_content(chunk_size=8192):
-            tmp_file.write(chunk)
-        tmp_path = tmp_file.name
+    written = 0
+    tmp_path = None
+    try:
+        with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp_file:
+            tmp_path = tmp_file.name
+            for chunk in response.iter_content(chunk_size=64 * 1024):
+                written += len(chunk)
+                if written > max_bytes:
+                    raise ValueError(
+                        f"Download exceeded {MAX_DOWNLOAD_MB} MB cap, aborting: {url}"
+                    )
+                tmp_file.write(chunk)
+    except Exception:
+        if tmp_path:
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
+        raise
+    finally:
+        response.close()
 
-    logger.info(f"Downloaded video to: {tmp_path}")
+    logger.info(f"Downloaded video to: {tmp_path} ({written / 1024 / 1024:.1f} MB)")
     return tmp_path
 
 
@@ -315,23 +335,23 @@ def generate_captions_for_video(
 ) -> dict[str, str]:
     """
     Generate video-level captions for all requested styles.
-    Uses Fireworks vision + Groq text.
+    Uses Fireworks vision (key #1) + Fireworks text (key #2).
     """
-    from services.image_analyzer import analyze_keyframe, save_analysis
+    from services.image_analyzer import analyze_keyframe_array, save_analysis
     from services.scene_aggregator import aggregate_by_scene
     from services.report_generator import generate_video_summary_reports
 
     if not FIREWORKS_API_KEY:
         logger.error("FIREWORKS_API_KEY not set in .env")
         return {}
-    if not GROQ_API_KEY:
-        logger.error("GROQ_API_KEY not set in .env")
+    if not FIREWORKS_TEXT_API_KEY:
+        logger.error("FIREWORKS_TEXT_API_KEY not set in .env")
         return {}
 
     vision_client = get_fireworks_client()
-    text_client = get_groq_client()
+    text_client = get_fireworks_text_client()
     vision_model = FIREWORKS_VISION_MODEL
-    text_model = GROQ_TEXT_MODEL
+    text_model = FIREWORKS_TEXT_MODEL
 
     # Analyze keyframes in parallel
     logger.info(f"Analyzing {len(selected)} keyframes in parallel...")
@@ -340,14 +360,10 @@ def generate_captions_for_video(
     analysis_dir.mkdir(parents=True, exist_ok=True)
 
     def _analyze_one(i, sf):
-        keyframe_path = str(output_dir / f"keyframe_{i:03d}.jpg")
-        if not Path(keyframe_path).exists():
-            logger.warning(f"Keyframe not found: {keyframe_path}")
-            return None
         try:
             analysis = retry_api_call(
-                lambda p=keyframe_path, s=sf, idx=i: analyze_keyframe(
-                    image_path=p,
+                lambda img=sf.image, s=sf, idx=i: analyze_keyframe_array(
+                    image=img,
                     hf_client=vision_client,
                     model=vision_model,
                     scene_id=s.scene_id,
@@ -498,80 +514,112 @@ def competition_main(input_path=None, output_path=None):
                 seen.add(mapped_style)
         return mapped
 
-    results = []
     total_start = time.time()
+    deadline = total_start + DEADLINE_SECONDS
 
+    # Pre-fill every task with placeholder captions so the output is ALWAYS
+    # complete, even if the deadline fires while tasks are still running.
+    task_order = []
+    results_by_id = {}
+    task_styles = {}
     for task in tasks:
-        task_id = task["task_id"]
+        task_id = str(task["task_id"]).strip()
+        styles = map_styles(task.get("styles", REPORT_STYLES))
+        task_order.append(task_id)
+        task_styles[task_id] = styles
+        results_by_id[task_id] = {
+            style: "Processing did not complete for this video clip."
+            for style in styles
+        }
+
+    def _process_task(task) -> tuple[str, dict]:
+        """Full pipeline for one task. Returns (task_id, captions)."""
+        task_id = str(task["task_id"]).strip()
         video_url = task["video_url"]
-        requested_styles = task.get("styles", REPORT_STYLES)
-        styles = map_styles(requested_styles)
-
-        logger.info(f"=== Processing task {task_id} ===")
-        logger.info(f"Styles: {requested_styles} -> {styles}")
+        styles = task_styles[task_id]
+        logger.info(f"=== Processing task {task_id} === styles={styles}")
         task_start = time.time()
-
+        video_path = None
         try:
-            # Download video
             video_path = download_video(video_url)
 
-            # Run pipeline
-            scenes = detect_scenes(video_path)
+            scenes, captured = detect_scenes(video_path)
             logger.info(f"Task {task_id}: Found {len(scenes)} scenes")
 
-            selected = select_keyframes(video_path, scenes)
+            selected = select_keyframes(video_path, scenes, captured)
+            del captured  # free frame memory before the API stage
             logger.info(f"Task {task_id}: Selected {len(selected)} keyframes")
 
-            # Save keyframes to temp dir
             output_dir = Path(tempfile.mkdtemp(prefix=f"task_{task_id}_"))
-            output_dir.mkdir(parents=True, exist_ok=True)
-
-            analysis_dir = output_dir / "analysis"
-            analysis_dir.mkdir(parents=True, exist_ok=True)
-
+            (output_dir / "analysis").mkdir(parents=True, exist_ok=True)
             for i, sf in enumerate(selected):
-                filepath = output_dir / f"keyframe_{i:03d}.jpg"
-                cv2.imwrite(str(filepath), _downscale_to_max_side(sf.image))
+                cv2.imwrite(str(output_dir / f"keyframe_{i:03d}.jpg"),
+                            _downscale_to_max_side(sf.image))
 
-            # Generate captions
             captions = generate_captions_for_video(output_dir, selected, scenes, styles)
 
-            # Cleanup temp video
-            try:
-                os.unlink(video_path)
-            except OSError:
-                pass
+            # Guarantee every requested style has a non-empty caption.
+            for style in styles:
+                if not captions.get(style):
+                    captions[style] = (
+                        f"A {sum(s.duration for s in scenes):.0f}-second video with "
+                        f"{len(scenes)} scene(s); detailed captioning was unavailable."
+                    )
 
-            task_time = time.time() - task_start
-            logger.info(f"Task {task_id} completed in {task_time:.1f}s")
-
-            results.append({
-                "task_id": task_id,
-                "captions": captions
-            })
-
+            logger.info(f"Task {task_id} completed in {time.time() - task_start:.1f}s")
+            return task_id, captions
         except Exception as e:
             logger.error(f"Task {task_id} failed: {e}")
-            # Still include task with placeholder captions to avoid zero score
-            results.append({
-                "task_id": task_id,
-                "captions": {style: f"Processing failed for this video clip." for style in styles}
-            })
+            return task_id, {
+                style: "Processing failed for this video clip." for style in styles
+            }
+        finally:
+            if video_path:
+                try:
+                    os.unlink(video_path)
+                except OSError:
+                    pass
 
-    # Write output
+    # Process tasks concurrently: downloads/decodes of one task overlap the
+    # API calls of another. Worker count is env-tunable for small judge VMs.
+    workers = min(MAX_TASK_WORKERS, max(1, len(tasks)))
+    logger.info(f"Processing {len(tasks)} tasks with {workers} workers "
+                f"(deadline {DEADLINE_SECONDS:.0f}s)")
+    executor = ThreadPoolExecutor(max_workers=workers)
+    futures = [executor.submit(_process_task, task) for task in tasks]
+    pending = set(futures)
+    try:
+        for future in as_completed(futures, timeout=max(5.0, deadline - time.time())):
+            pending.discard(future)
+            task_id, captions = future.result()
+            results_by_id[task_id] = captions
+            if time.time() > deadline:
+                logger.warning("Deadline reached; writing results with completed tasks")
+                break
+    except FuturesTimeoutError:
+        logger.warning(
+            f"Deadline ({DEADLINE_SECONDS:.0f}s) hit with {len(pending)} task(s) "
+            f"unfinished; writing partial results with placeholders"
+        )
+
+    # Write output (placeholders remain for anything unfinished).
+    results = [{"task_id": tid, "captions": results_by_id[tid]} for tid in task_order]
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    with open(output_path, "w") as f:
-        json.dump(results, f, indent=2)
+    with open(output_path, "w", encoding="utf-8") as f:
+        json.dump(results, f, indent=2, ensure_ascii=False)
 
     total_time = time.time() - total_start
-    logger.info(f"All tasks completed in {total_time:.1f}s")
+    done = sum(1 for f in futures if f.done())
+    logger.info(f"{done}/{len(tasks)} tasks completed in {total_time:.1f}s")
     logger.info(f"Results written to {output_path}")
-    sys.exit(0)
+    # Force-exit: worker threads may still be blocked on network I/O after a
+    # deadline break, and results are already safely on disk.
+    sys.stdout.flush()
+    sys.stderr.flush()
+    os._exit(0)
 
 
-def main():
-    args = parse_args()
-
+def main(args):
     video_path = args.video_path
     if not video_path or not os.path.isfile(video_path):
         print(f"Error: Video not found: {video_path}")
@@ -586,7 +634,7 @@ def main():
     run_start = time.time()
     logger.info(f"=== START pipeline for: {video_path} ===")
 
-    scenes = detect_scenes(video_path)
+    scenes, captured = detect_scenes(video_path)
     logger.info(f"Number of scenes found: {len(scenes)}")
 
     output_dir = Path("output") / _video_short_name(video_path)
@@ -594,7 +642,7 @@ def main():
     logger.info(f"Output folder: {output_dir.resolve()}")
 
     # --- Embedding-based keyframe selection (replaces single-frame extraction) ---
-    selected = select_keyframes(video_path, scenes)
+    selected = select_keyframes(video_path, scenes, captured)
     logger.info(f"✅ Selected keyframes: {len(selected)} (MAX_FRAMES budget enforced globally)")
 
     keyframes_data = []
@@ -619,8 +667,8 @@ def main():
     logger.info(f"Wrote {len(keyframes_data)} JPEGs in {time.time() - save_start:.2f}s")
 
     keyframes_json_path = output_dir / "keyframes.json"
-    with open(keyframes_json_path, "w") as f:
-        json.dump(keyframes_data, f, indent=2)
+    with open(keyframes_json_path, "w", encoding="utf-8") as f:
+        json.dump(keyframes_data, f, indent=2, ensure_ascii=False)
     logger.info(f"✅ Saved: keyframes.json ({len(keyframes_data)} frames)")
 
     # --- Preserve scene-detection metadata for the downstream handoff ---
@@ -633,8 +681,8 @@ def main():
             "duration": scene.duration,
         })
     scenes_json_path = output_dir / "scenes.json"
-    with open(scenes_json_path, "w") as f:
-        json.dump(scenes_data, f, indent=2)
+    with open(scenes_json_path, "w", encoding="utf-8") as f:
+        json.dump(scenes_data, f, indent=2, ensure_ascii=False)
     logger.info(f"Saved: scenes.json ({len(scenes_data)} scenes)")
 
     total = time.time() - run_start
@@ -653,7 +701,6 @@ def main():
             selected=selected,
             scenes=scenes,
             styles=styles,
-            provider=args.provider
         )
         report_total = time.time() - report_start
         logger.info(f"Report generation completed in {report_total:.2f}s")
@@ -666,8 +713,8 @@ def main():
             "captions": captions
         }
         json_path = output_dir / "captions.json"
-        with open(json_path, "w") as f:
-            json.dump(output_json, f, indent=2)
+        with open(json_path, "w", encoding="utf-8") as f:
+            json.dump(output_json, f, indent=2, ensure_ascii=False)
         logger.info(f"✅ Captions saved to: {json_path.resolve()}")
 
 
@@ -681,7 +728,7 @@ if __name__ == "__main__":
         competition_main()
     elif args.video_path:
         # Single video mode
-        main()
+        main(args)
     else:
         print("Error: Provide --input <tasks.json> or a video file path")
         sys.exit(1)
