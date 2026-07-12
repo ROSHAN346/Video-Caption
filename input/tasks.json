@@ -1,0 +1,62 @@
+[
+  {
+    "task_id": "urban_autumn_boulevard",
+    "video_url": "https://storage.googleapis.com/amd-hackathon-clips/1860079-uhd_2560_1440_25fps.mp4",
+    "styles": ["formal", "sarcastic", "humorous_tech", "humorous_non_tech"]
+  },
+  {
+    "task_id": "garden_kitten",
+    "video_url": "https://storage.googleapis.com/amd-hackathon-clips/13825391-uhd_3840_2160_30fps.mp4",
+    "styles": ["formal", "sarcastic", "humorous_tech", "humorous_non_tech"]
+  },
+  {
+    "task_id": "office_worker",
+    "video_url": "https://storage.googleapis.com/amd-hackathon-clips/3044693-uhd_3840_2160_24fps.mp4",
+    "styles": ["formal", "sarcastic", "humorous_tech", "humorous_non_tech"]
+  },
+  {
+    "task_id": "weather ",
+    "video_url": "https://www.pexels.com/download/video/4935872/?fps=25.0&h=506&w=960",
+    "styles": ["formal", "sarcastic", "humorous_tech", "humorous_non_tech"]
+  },
+  {
+    "task_id": "nature_and_people",
+    "video_url": "https://www.pexels.com/download/video/10653842/?fps=25.0&h=506&w=960",
+    "styles": ["formal", "sarcastic", "humorous_tech", "humorous_non_tech"]
+  },
+  {
+    "task_id": "tech",
+    "video_url": "https://www.pexels.com/download/video/36749605/?fps=50.0&h=540&w=960",
+    "styles": ["formal", "sarcastic", "humorous_tech", "humorous_non_tech"]
+  },
+  {
+    "task_id": "people",
+    "video_url": "https://www.pexels.com/download/video/6321922/?fps=25.0&h=506&w=960",
+    "styles": ["formal", "sarcastic", "humorous_tech", "humorous_non_tech"]
+  },
+  {
+    "task_id": "playing_urban",
+    "video_url": "https://www.pexels.com/download/video/4929207/?fps=25.0&h=960&w=506",
+    "styles": ["formal", "sarcastic", "humorous_tech", "humorous_non_tech"]
+  },
+  {
+    "task_id": "pepople",
+    "video_url": "https://www.pexels.com/download/video/10400753/?fps=25.0&h=506&w=960",
+    "styles": ["formal", "sarcastic", "humorous_tech", "humorous_non_tech"]
+  },
+  {
+    "task_id": "car",
+    "video_url": "https://www.pexels.com/download/video/7727415/?fps=25.0&h=540&w=960",
+    "styles": ["formal", "sarcastic", "humorous_tech", "humorous_non_tech"]
+  },
+  {
+    "task_id": "person_pc",
+    "video_url": "https://www.pexels.com/download/video/29336002/?fps=29.97&h=540&w=960",
+    "styles": ["formal", "sarcastic", "humorous_tech", "humorous_non_tech"]
+  },
+  {
+    "task_id": "camera",
+    "video_url": "https://www.pexels.com/download/video/9808078/?fps=25.0&h=506&w=960",
+    "styles": ["formal", "sarcastic", "humorous_tech", "humorous_non_tech"]
+  }
+]
