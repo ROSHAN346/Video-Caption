@@ -10,16 +10,18 @@ DETECTOR_CONFIG = {
     "min_content_val": 15.0,
 }
 
+# Default frame sampling strategy for legacy single-frame per scene sampler
+# (frame_sampler.extract_frames).
 FRAME_STRATEGY = "middle"
 
 # --- Embedding-based keyframe selection config (this phase) ---
 # Hard ceiling on total selected keyframes for ANY video (single- or multi-scene).
-MAX_FRAMES = 30
+MAX_FRAMES = 5
 # Dense candidate sampling rate inside each scene (frames per second).
 # Higher = finer temporal coverage (smaller chance of missing a brief event),
 # at the cost of more embedding work. Bumped from 2.5 -> 5.0 to shrink the
 # fixed-rate sampling blind spot for short/rare occurrences.
-CANDIDATE_FPS = 5.0
+CANDIDATE_FPS = 2
 # CLIP model variant. ViT-B/32 is the lightest reasonable option for CPU inference.
 CLIP_MODEL_NAME = "ViT-B/32"
 # Frames embedded per forward pass (kept modest for 16GB / no-GPU machines).

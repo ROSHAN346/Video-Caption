@@ -1,0 +1,16 @@
+.git
+.gitignore
+__pycache__
+**/__pycache__
+.pyc
+.pyo
+output/
+input/videos/
+.env
+.env.*
+*.md
+README*
+ARCHITECTURE*
+IMPLEMENTATION*
+PROJECT_DOCUMENTATION*
+test_*

@@ -3,8 +3,11 @@ import json
 import os
 import time
 import re
+import shutil
 import logging
 import argparse
+import urllib.request
+import urllib.error
 import cv2
 from pathlib import Path
 
@@ -31,6 +34,7 @@ def _downscale_to_max_side(frame: "cv2.typing.MatLike") -> "cv2.typing.MatLike":
     return cv2.resize(frame, (int(round(w * scale)), int(round(h * scale))),
                       interpolation=cv2.INTER_AREA)
 
+
 logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(message)s", datefmt="%H:%M:%S")
 logger = logging.getLogger(__name__)
 
@@ -40,35 +44,58 @@ def parse_args():
     parser = argparse.ArgumentParser(
         description="Video Keyframe Extraction with AI Report Generation"
     )
-    parser.add_argument("video_path", help="Path to video file")
+    parser.add_argument(
+        "video_path",
+        nargs="?",
+        default=None,
+        help="Path to a single video file (mutually exclusive with --input)",
+    )
+    parser.add_argument(
+        "--input",
+        help="Batch JSON task list (each entry: task_id, video_url, styles)",
+    )
+    parser.add_argument(
+        "--output",
+        help="Path to write results.json (used with --input)",
+    )
     parser.add_argument(
         "--reports",
         action="store_true",
-        help="Generate AI analysis reports"
+        help="Generate AI analysis reports",
     )
     parser.add_argument(
         "--style",
         choices=REPORT_STYLES,
         default=DEFAULT_REPORT_STYLE,
-        help=f"Report style (default: {DEFAULT_REPORT_STYLE})"
+        help=f"Report style (default: {DEFAULT_REPORT_STYLE})",
     )
     parser.add_argument(
         "--all-styles",
         action="store_true",
-        help="Generate reports in all styles"
+        help="Generate reports in all styles (single-video mode only)",
     )
     parser.add_argument(
         "--no-pdf",
         action="store_true",
-        help="Skip PDF generation"
+        help="Skip PDF generation",
     )
     parser.add_argument(
         "--provider",
         choices=["huggingface", "fireworks"],
         default=AI_PROVIDER,
-        help=f"AI provider to use (default: {AI_PROVIDER})"
+        help=f"AI provider to use (default: {AI_PROVIDER})",
     )
-    return parser.parse_args()
+
+    args = parser.parse_args()
+
+    if args.input and args.video_path:
+        parser.error("Cannot specify both a positional video_path and --input")
+    if args.input and not args.output:
+        parser.error("--output is required when --input is used")
+    if args.output and not args.input:
+        parser.error("--output requires --input")
+
+    return args
 
 
 def generate_reports_pipeline(
@@ -77,9 +104,17 @@ def generate_reports_pipeline(
     scenes: list,
     styles: list[str],
     generate_pdf: bool = True,
-    provider: str = AI_PROVIDER
-):
-    """Run the report generation pipeline."""
+    provider: str = AI_PROVIDER,
+) -> dict:
+    """Run the per-scene report generation pipeline.
+
+    Writes per-scene .md (and optionally .pdf) reports under
+    ``output_dir/reports/scene_XXX/<style>.{md,pdf}``.
+
+    Returns:
+        ``{"analyses": [...], "scene_analyses": {...}}`` so the caller can
+        synthesize a video-level summary without re-running analysis.
+    """
     from services.hf_client import get_hf_client
     from services.fireworks_client import get_fireworks_client
     from services.image_analyzer import analyze_keyframe, save_analysis
@@ -88,9 +123,10 @@ def generate_reports_pipeline(
     from services.report_cache import ReportCache
     from services.pdf_generator import generate_report_pdf
 
+    empty = {"analyses": [], "scene_analyses": {}}
+
     logger.info(f"=== START Report Generation (provider: {provider}) ===")
 
-    # Initialize client based on provider
     try:
         if provider == "fireworks":
             if not FIREWORKS_API_KEY:
@@ -98,7 +134,7 @@ def generate_reports_pipeline(
                     "FIREWORKS_API_KEY not set. Please create a .env file with your key.\n"
                     "Get yours at: https://fireworks.ai/account/api-keys"
                 )
-                return
+                return empty
             client = get_fireworks_client()
             vision_model = FIREWORKS_VISION_MODEL
             text_model = FIREWORKS_TEXT_MODEL
@@ -109,22 +145,20 @@ def generate_reports_pipeline(
                     "HF_API_TOKEN not set. Please create a .env file with your token.\n"
                     "Get yours at: https://huggingface.co/settings/tokens"
                 )
-                return
+                return empty
             client = get_hf_client()
             vision_model = HF_VISION_MODEL
             text_model = HF_TEXT_MODEL
             logger.info("Using Hugging Face provider")
     except Exception as e:
         logger.error(f"Failed to initialize {provider} client: {e}")
-        return
+        return empty
 
     cache = ReportCache(str(output_dir / "reports"))
 
-    # Create analysis directory
     analysis_dir = output_dir / "analysis"
     analysis_dir.mkdir(parents=True, exist_ok=True)
 
-    # Analyze keyframes
     logger.info(f"Analyzing {len(selected)} keyframes with vision model...")
     analyses = []
 
@@ -141,15 +175,13 @@ def generate_reports_pipeline(
                 hf_client=client,
                 model=vision_model,
                 scene_id=sf.scene_id,
-                frame_index=i
+                frame_index=i,
             )
-            # Skip if analysis failed (empty/unavailable)
             if analysis.get("summary") in ["Analysis unavailable", "Analysis failed to parse", ""]:
                 logger.warning(f"Frame {i} analysis failed, skipping")
                 continue
             analyses.append(analysis)
 
-            # Save individual analysis
             analysis_path = analysis_dir / f"scene_{sf.scene_id:03d}_frame_{i:03d}.json"
             save_analysis(analysis, str(analysis_path))
 
@@ -160,7 +192,6 @@ def generate_reports_pipeline(
 
     if not analyses:
         logger.warning("No keyframes analyzed via vision model. Using scene detection data as fallback.")
-        # Create fallback analysis from scene detection data
         for scene in scenes:
             fallback = {
                 "scene_id": scene.scene_number,
@@ -177,16 +208,14 @@ def generate_reports_pipeline(
                 "environment": "unknown",
                 "risk_level": "low",
                 "confidence": 0.5,
-                "summary": f"Scene {scene.scene_number}: {scene.duration:.1f}s video segment (frames {scene.start_frame}-{scene.end_frame}) with {len(selected)} keyframes selected for analysis."
+                "summary": f"Scene {scene.scene_number}: {scene.duration:.1f}s video segment (frames {scene.start_frame}-{scene.end_frame}) with {len(selected)} keyframes selected for analysis.",
             }
             analyses.append(fallback)
         logger.info(f"Created fallback analysis for {len(scenes)} scenes")
 
-    # Aggregate by scene
     logger.info("Aggregating analyses by scene...")
     scene_analyses = aggregate_by_scene(analyses, scenes)
 
-    # Generate reports
     logger.info(f"Generating {len(styles)} report styles...")
     for scene_id, scene_data in scene_analyses.items():
         logger.info(f"Processing scene {scene_id}...")
@@ -194,20 +223,17 @@ def generate_reports_pipeline(
         reports = generate_all_reports(scene_data, client, styles, text_model)
 
         for style, report in reports.items():
-            # Cache report
             cache.cache_report(scene_id, style, report, {
                 "vision_model": vision_model,
                 "text_model": text_model,
-                "provider": provider
+                "provider": provider,
             })
 
-            # Save markdown report
             md_path = cache.get_cache_path(scene_id, style)
             logger.info(f"Saved {style} report: {md_path}")
 
-            # Generate PDF if enabled
             if generate_pdf:
-                keyframe_path = str(output_dir / f"keyframe_000.jpg")
+                keyframe_path = str(output_dir / "keyframe_000.jpg")
                 pdf_path = cache.get_pdf_path(scene_id, style)
                 try:
                     generate_report_pdf(
@@ -216,18 +242,60 @@ def generate_reports_pipeline(
                         report=report,
                         keyframe_path=keyframe_path,
                         scene_data=scene_data,
-                        output_path=str(pdf_path)
+                        output_path=str(pdf_path),
                     )
                     logger.info(f"Generated PDF: {pdf_path}")
                 except Exception as e:
                     logger.error(f"Error generating PDF for {style}: {e}")
 
-    # Print summary
     stats = cache.get_cache_stats()
     logger.info("=== Report Generation Complete ===")
     logger.info(f"Scenes processed: {stats['total_scenes']}")
     logger.info(f"Reports generated: {stats['total_reports']}")
     logger.info(f"Output directory: {output_dir / 'reports'}")
+
+    return {"analyses": analyses, "scene_analyses": scene_analyses}
+
+
+def _generate_video_summary(
+    scene_analyses: dict,
+    styles: list[str],
+    provider: str,
+) -> dict[str, str]:
+    """Synthesize one video-level summary text per requested style.
+
+    Uses ``generate_video_summary_reports`` which collapses
+    ``aggregate_activities`` over all scenes into a single prompt per style.
+    Falls back to a stub if there are no scene analyses.
+    """
+    if not scene_analyses:
+        return {style: "Report unavailable (no scene analyses)" for style in styles}
+
+    from services.hf_client import get_hf_client
+    from services.fireworks_client import get_fireworks_client
+    from services.report_generator import generate_video_summary_reports
+
+    try:
+        client = (
+            get_fireworks_client() if provider == "fireworks" else get_hf_client()
+        )
+        text_model = (
+            FIREWORKS_TEXT_MODEL if provider == "fireworks" else HF_TEXT_MODEL
+        )
+    except Exception as e:
+        logger.error(f"Failed to build summary client: {e}")
+        return {style: f"Report unavailable (client init failed: {e})" for style in styles}
+
+    try:
+        return generate_video_summary_reports(
+            scene_analyses=scene_analyses,
+            hf_client=client,
+            styles=styles,
+            model=text_model,
+        )
+    except Exception as e:
+        logger.error(f"Video-level summary failed: {e}")
+        return {style: f"Report unavailable ({e})" for style in styles}
 
 
 def format_timecode(seconds: float) -> str:
@@ -252,40 +320,107 @@ def _video_short_name(video_path: str) -> str:
     return safe or stem
 
 
-def main():
-    args = parse_args()
+def _safe_task_id(task_id: str) -> str:
+    """Sanitize a task_id for filesystem use (e.g. dict key, output folder)."""
+    safe = re.sub(r"[^A-Za-z0-9._-]", "_", task_id).strip("._-")
+    return safe or "task"
 
-    video_path = args.video_path
-    if not os.path.isfile(video_path):
-        print(f"Error: Video not found: {video_path}")
-        sys.exit(1)
 
-    # Determine which styles to generate
-    if args.all_styles:
-        styles = REPORT_STYLES
-    else:
-        styles = [args.style]
+def _infer_ext_from_url(url: str) -> str:
+    """Best-effort extension from a URL (ignores query string)."""
+    path = url.split("?", 1)[0].lower()
+    for ext in (".mp4", ".mov", ".webm", ".mkv", ".avi"):
+        if path.endswith(ext):
+            return ext
+    return ".mp4"
+
+
+def _download_video(url: str, dest: Path) -> None:
+    """Stream-download a video URL to ``dest``. Skips if already cached."""
+    dest.parent.mkdir(parents=True, exist_ok=True)
+
+    if dest.exists() and dest.stat().st_size > 0:
+        logger.info(f"Cache hit ({dest.stat().st_size} bytes): {dest}")
+        return
+
+    logger.info(f"Downloading: {url} -> {dest}")
+    req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+    try:
+        with urllib.request.urlopen(req, timeout=300) as resp:
+            with open(dest, "wb") as f:
+                shutil.copyfileobj(resp, f)
+    except urllib.error.URLError as e:
+        raise RuntimeError(f"Failed to download {url}: {e}") from e
+
+    logger.info(f"Downloaded {dest.stat().st_size} bytes -> {dest}")
+
+
+def _ensure_video(task_id: str, url: str) -> Path:
+    """Return a local path for the task video, downloading if not cached."""
+    safe = _safe_task_id(task_id)
+    ext = _infer_ext_from_url(url)
+    dest = Path("input") / "videos" / f"{safe}{ext}"
+    _download_video(url, dest)
+    return dest
+
+
+def _load_tasks(path: str) -> list[dict]:
+    """Load the batch task JSON file."""
+    p = Path(path)
+    if not p.exists():
+        raise FileNotFoundError(f"Tasks file not found: {path}")
+    with open(p, "r", encoding="utf-8") as f:
+        data = json.load(f)
+    if not isinstance(data, list):
+        raise ValueError(f"Expected a JSON array in {path}")
+    return data
+
+
+def _build_ai_client(provider: str):
+    """Construct the configured AI client (HF or Fireworks)."""
+    if provider == "fireworks":
+        if not FIREWORKS_API_KEY:
+            raise RuntimeError("FIREWORKS_API_KEY not set in .env")
+        from services.fireworks_client import get_fireworks_client
+        return get_fireworks_client()
+    if not HF_API_TOKEN:
+        raise RuntimeError("HF_API_TOKEN not set in .env")
+    from services.hf_client import get_hf_client
+    return get_hf_client()
+
+
+def _run_pipeline(
+    video_path: str,
+    output_dir: Path,
+    ai_client,
+    styles: list[str],
+    provider: str,
+    generate_pdf: bool,
+) -> dict:
+    """Run the full per-video pipeline and return an in-memory result dict.
+
+    Side effects:
+        - Writes JPEGs, ``keyframes.json``, ``scenes.json`` under ``output_dir``.
+        - When ``styles`` is non-empty, writes per-scene reports and PDFs.
+    """
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
 
     run_start = time.time()
     logger.info(f"=== START pipeline for: {video_path} ===")
 
     scenes = detect_scenes(video_path)
     logger.info(f"Number of scenes found: {len(scenes)}")
-
-    output_dir = Path("output") / _video_short_name(video_path)
-    output_dir.mkdir(parents=True, exist_ok=True)
     logger.info(f"Output folder: {output_dir.resolve()}")
 
-    # --- Embedding-based keyframe selection (replaces single-frame extraction) ---
     selected = select_keyframes(video_path, scenes)
-    logger.info(f"✅ Selected keyframes: {len(selected)} (MAX_FRAMES budget enforced globally)")
+    logger.info(f"Selected keyframes: {len(selected)} (MAX_FRAMES budget enforced globally)")
 
     keyframes_data = []
     save_start = time.time()
     for i, sf in enumerate(selected):
         filename = f"keyframe_{i:03d}.jpg"
         filepath = output_dir / filename
-        # image is a BGR numpy array from cv2; downscale longest side, then write JPEG.
         cv2.imwrite(str(filepath), _downscale_to_max_side(sf.image))
         keyframes_data.append({
             "frame_index": sf.frame_index,
@@ -304,9 +439,8 @@ def main():
     keyframes_json_path = output_dir / "keyframes.json"
     with open(keyframes_json_path, "w") as f:
         json.dump(keyframes_data, f, indent=2)
-    logger.info(f"✅ Saved: keyframes.json ({len(keyframes_data)} frames)")
+    logger.info(f"Saved: keyframes.json ({len(keyframes_data)} frames)")
 
-    # --- Preserve scene-detection metadata for the downstream handoff ---
     scenes_data = []
     for scene in scenes:
         scenes_data.append({
@@ -320,27 +454,152 @@ def main():
         json.dump(scenes_data, f, indent=2)
     logger.info(f"Saved: scenes.json ({len(scenes_data)} scenes)")
 
+    duration_sec = round(sum(s.duration for s in scenes), 3)
     total = time.time() - run_start
-    logger.info("✅ === PHASE ARTIFACT COMPLETE ===")
     logger.info(
-        f"✅ VERIFY: scenes={len(scenes)} | keyframes={len(selected)} "
+        f"Pipeline Phase complete: scenes={len(scenes)} | keyframes={len(selected)} "
         f"(<=MAX_FRAMES={MAX_FRAMES}) | total runtime={total:.2f}s"
     )
-    logger.info(f"Output: {output_dir.resolve()}")
 
-    # --- Report Generation (if enabled) ---
-    if args.reports:
+    result = {
+        "scenes": scenes_data,
+        "keyframes": keyframes_data,
+        "duration_sec": duration_sec,
+        "analyses": [],
+        "scene_analyses": {},
+        "reports_by_style": {},
+    }
+
+    if styles and ai_client is not None:
         report_start = time.time()
-        generate_reports_pipeline(
+        report_bundle = generate_reports_pipeline(
             output_dir=output_dir,
             selected=selected,
             scenes=scenes,
             styles=styles,
-            generate_pdf=not args.no_pdf,
-            provider=args.provider
+            generate_pdf=generate_pdf,
+            provider=provider,
+        )
+        result["analyses"] = report_bundle["analyses"]
+        result["scene_analyses"] = report_bundle["scene_analyses"]
+        result["reports_by_style"] = _generate_video_summary(
+            scene_analyses=report_bundle["scene_analyses"],
+            styles=styles,
+            provider=provider,
         )
         report_total = time.time() - report_start
         logger.info(f"Report generation completed in {report_total:.2f}s")
+
+    return result
+
+
+def _process_task(task: dict, ai_client, no_pdf: bool) -> dict:
+    """Process one batch task and return its result record (or error record)."""
+    raw_task_id = str(task.get("task_id", "")).strip() or "task"
+    safe_id = _safe_task_id(raw_task_id)
+    video_url = task.get("video_url", "")
+    styles = task.get("styles") or REPORT_STYLES
+
+    record: dict = {
+        "task_id": raw_task_id,
+        "video_url": video_url,
+        "video_path": None,
+        "duration_sec": None,
+        "scenes": [],
+        "keyframes": [],
+        "reports_by_style": {},
+        "error": None,
+    }
+
+    try:
+        video_path = _ensure_video(raw_task_id, video_url)
+        record["video_path"] = str(video_path)
+
+        output_dir = Path("output") / safe_id
+        result = _run_pipeline(
+            video_path=str(video_path),
+            output_dir=output_dir,
+            ai_client=ai_client,
+            styles=styles,
+            provider=AI_PROVIDER,
+            generate_pdf=not no_pdf,
+        )
+        record["duration_sec"] = result["duration_sec"]
+        record["scenes"] = result["scenes"]
+        record["keyframes"] = result["keyframes"]
+        record["reports_by_style"] = result["reports_by_style"]
+    except Exception as e:
+        logger.exception(f"Task {raw_task_id!r} failed: {e}")
+        record["error"] = f"{type(e).__name__}: {e}"
+
+    return record
+
+
+def _run_batch(args) -> None:
+    """Batch entrypoint: iterate tasks, run pipeline, write results.json."""
+    tasks = _load_tasks(args.input)
+    logger.info(f"Loaded {len(tasks)} task(s) from {args.input}")
+
+    ai_client = None
+    try:
+        ai_client = _build_ai_client(args.provider)
+    except Exception as e:
+        logger.error(f"AI client init failed; report sections will be empty: {e}")
+
+    results: dict[str, dict] = {}
+    for i, task in enumerate(tasks, start=1):
+        raw_task_id = str(task.get("task_id", "")).strip() or f"task_{i}"
+        safe_id = _safe_task_id(raw_task_id)
+        logger.info(f"=== [{i}/{len(tasks)}] task_id={raw_task_id!r} ===")
+        record = _process_task(task, ai_client, args.no_pdf)
+        results[safe_id] = record
+
+    out_path = Path(args.output)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(out_path, "w", encoding="utf-8") as f:
+        json.dump(results, f, indent=2, ensure_ascii=False)
+    logger.info(f"Wrote results ({len(results)} task(s)): {out_path.resolve()}")
+
+
+def _run_single(args) -> None:
+    """Single-video entrypoint: preserves original CLI behavior."""
+    if not args.video_path:
+        print("Error: video_path is required (or pass --input for batch mode)", file=sys.stderr)
+        sys.exit(2)
+    if not os.path.isfile(args.video_path):
+        print(f"Error: Video not found: {args.video_path}", file=sys.stderr)
+        sys.exit(1)
+
+    if args.all_styles:
+        styles = REPORT_STYLES
+    else:
+        styles = [args.style]
+
+    ai_client = None
+    if args.reports:
+        try:
+            ai_client = _build_ai_client(args.provider)
+        except Exception as e:
+            logger.error(f"AI client init failed; reports will be skipped: {e}")
+
+    output_dir = Path("output") / _video_short_name(args.video_path)
+    _run_pipeline(
+        video_path=args.video_path,
+        output_dir=output_dir,
+        ai_client=ai_client,
+        styles=styles if args.reports else [],
+        provider=args.provider,
+        generate_pdf=not args.no_pdf,
+    )
+    logger.info(f"Output: {output_dir.resolve()}")
+
+
+def main():
+    args = parse_args()
+    if args.input:
+        _run_batch(args)
+    else:
+        _run_single(args)
 
 
 if __name__ == "__main__":

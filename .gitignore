@@ -5,6 +5,7 @@ __pycache__/
 
 # Pipeline artifacts (generated outputs, not source)
 output/
+input/videos/
 
 # Downloaded test videos (large binaries)
 *.mp4
