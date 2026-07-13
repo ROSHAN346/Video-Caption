@@ -661,7 +661,7 @@ with tab_single:
                 kind = "info" if status == "running" else ("success" if status == "done" else "error")
                 status_text = "Running" if status == "running" else ("Complete" if status == "done" else "Error")
                 with progress_anchor.container():
-                    st.iframe(_auto_scroll_js(), height=0, scrolling=False)
+                    st.iframe(_auto_scroll_js(), height=0)
                     st.markdown(
                         f"""
                         <div id="pipeline-progress-anchor"></div>
