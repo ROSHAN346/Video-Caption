@@ -42,12 +42,12 @@ st.markdown(
         .block-container { padding-top: 2.5rem; padding-bottom: 3rem; }
         h1 { font-size: 2.2rem; margin-bottom: 0.2rem; }
         .big-num { font-size: 1.6rem; font-weight: 700; }
-        .card { background: #f8f9fb; border: 1px solid #e6e8ec;
-                border-radius: 12px; padding: 1.1rem 1.3rem; margin-bottom: 1rem; }
-        .keyframe-card { background: #ffffff; border: 1px solid #e2e8f0;
-                border-radius: 8px; padding: 0.6rem; text-align: center; }
+        .card { background: #1e1e2e; border: 1px solid #3a3a4a;
+                border-radius: 12px; padding: 1.1rem 1.3rem; margin-bottom: 1rem; color: #e0e0e0; }
+        .keyframe-card { background: #2a2a3a; border: 1px solid #3a3a4a;
+                border-radius: 8px; padding: 0.6rem; text-align: center; color: #e0e0e0; }
         .section-gap { margin-top: 2.2rem; }
-        .muted { color: #6b7280; }
+        .muted { color: #9ca3af; }
     </style>
     """,
     unsafe_allow_html=True,
