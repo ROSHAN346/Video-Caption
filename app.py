@@ -772,6 +772,18 @@ with tab_single:
                         st.error("Output captions.json was not created.")
                 else:
                     render_progress(current_step, f"Pipeline failed (exit code {proc.returncode})", "error")
+                    # Surface the actual error log so the user can see what went wrong
+                    with progress_anchor.container():
+                        st.markdown(
+                            f'<div class="card" style="border-color: var(--error);margin-top:0.5rem;">'
+                            f'<div class="card-header"><div class="card-title">📋 Error Log</div></div>'
+                            f'<pre style="background:var(--surface-2);padding:0.75rem;border-radius:6px;'
+                            f'font-size:0.78rem;color:var(--text-secondary);overflow-x:auto;'
+                            f'max-height:300px;overflow-y:auto;white-space:pre-wrap;">'
+                            f'{chr(10).join(log_lines[-50:]) if log_lines else "No output captured."}</pre>'
+                            f'</div>',
+                            unsafe_allow_html=True,
+                        )
             except Exception as e:
                 st.error(f"Error: {e}")
 
