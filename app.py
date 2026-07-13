@@ -149,21 +149,6 @@ def show_results(results: list, times: dict):
             if isinstance(text, str) and "Processing failed" in text:
                 placeholder += 1
 
-    with st.expander("🔍 Detailed Analysis", expanded=True):
-        st.markdown(
-            f"- **Total tasks:** {len(results)}\n"
-            f"- **Total captions generated:** {n_captions}\n"
-            f"- **Placeholder/failed captions:** {placeholder}\n"
-            f"- **Total time:** {total_time:.1f}s (overall) | "
-            f"**Avg/video:** {avg_time:.1f}s\n"
-            f"- **Per-video times:** "
-            + ", ".join(f"{k}={v['time']:.1f}s" for k, v in task_times.items()
-                        if v.get('state') == 'done')
-        )
-        if style_counts:
-            st.markdown("**Captions per style:**")
-            st.bar_chart(style_counts)
-
     # Per-video results
     st.markdown("<div class='section-gap'></div>", unsafe_allow_html=True)
     st.subheader("🎥 Per-video captions")
@@ -512,7 +497,6 @@ with tab_batch:
                             status["__total__"] = overall
                         st.session_state.results = results
                         st.session_state.times = status
-                        show_results(results, status)
                     else:
                         st.error(f"Pipeline exited with code {proc.returncode}.")
                 except FileNotFoundError:
