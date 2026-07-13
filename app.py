@@ -9,7 +9,14 @@ import tempfile
 from pathlib import Path
 
 import streamlit as st
-import streamlit_antd_components as sac
+
+try:
+    import streamlit_antd_components as sac
+    SAC_AVAILABLE = True
+except ImportError:
+    sac = None
+    SAC_AVAILABLE = False
+
 import streamlit.components.v1 as components
 
 try:
@@ -682,13 +689,28 @@ with tab_single:
                     )
                     step_titles = ["Scene Detection", "Keyframe Selection", "Vision Analysis", "Caption Generation"]
                     step_descs = ["Split video into scenes", "Extract representative frames", "Analyze frames with AI", "Generate styled captions"]
-                    sac.steps(
-                        items=[sac.StepsItem(title=t, description=d) for t, d in zip(step_titles, step_descs)],
-                        index=stage if status == "running" else 4,
-                        size='sm',
-                        direction='horizontal',
-                        key=f"progress_step_{stage}_{status}",
-                    )
+                    if SAC_AVAILABLE:
+                        sac.steps(
+                            items=[sac.StepsItem(title=t, description=d) for t, d in zip(step_titles, step_descs)],
+                            index=stage if status == "running" else 4,
+                            size='sm',
+                            direction='horizontal',
+                            key=f"progress_step_{stage}_{status}",
+                        )
+                    else:
+                        # Fallback: show progress as numbered list
+                        st.markdown(
+                            "".join(
+                                f'<div style="padding:0.4rem 0;color:var(--text-primary,{""});font-size:0.85rem;'
+                                f'{"opacity:1;color:var(--accent);" if i == stage or (status == "done" and i == 3) else "opacity:0.5;"}'
+                                f'border-left:2px solid {"var(--accent)" if i == stage or (status == "done" and i == 3) else "var(--border)"};'
+                                f'padding-left:0.75rem;margin:0.2rem 0;">'
+                                f'{"✓ " if (status == "done" and i < 4) or (status == "running" and i < stage) else ""}'
+                                f'{i+1}. {t}</div>'
+                                for i, (t, d) in enumerate(zip(step_titles, step_descs))
+                            ),
+                            unsafe_allow_html=True,
+                        )
 
             render_progress(0, "Initializing pipeline...", "running")
 
