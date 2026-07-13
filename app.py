@@ -25,9 +25,8 @@ except Exception:
 
 
 def _auto_scroll_js() -> str:
-    """Returns JS that scrolls the page to the pipeline-progress-anchor element."""
+    """Returns raw JS body that scrolls the page to the pipeline-progress-anchor element."""
     return """
-    <script>
         (function() {
             const tries = [50, 200, 500, 1000, 1500];
             tries.forEach(function(delay) {
@@ -40,7 +39,6 @@ def _auto_scroll_js() -> str:
                 }, delay);
             });
         })();
-    </script>
     """
 
 
@@ -661,7 +659,11 @@ with tab_single:
                 kind = "info" if status == "running" else ("success" if status == "done" else "error")
                 status_text = "Running" if status == "running" else ("Complete" if status == "done" else "Error")
                 with progress_anchor.container():
-                    st.iframe(_auto_scroll_js(), height=0)
+                    # Inject JS via unsafe HTML — safer across Streamlit versions than st.iframe.
+                    st.markdown(
+                        f"<script>{_auto_scroll_js()}</script>",
+                        unsafe_allow_html=True,
+                    )
                     st.markdown(
                         f"""
                         <div id="pipeline-progress-anchor"></div>
