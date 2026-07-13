@@ -1,12 +1,22 @@
 from dataclasses import dataclass
 import logging
+import os
 import time
 
 import cv2
 import numpy as np
 
 from config import MAX_FRAMES, CANDIDATE_FPS, EMBEDDING_BATCH_SIZE, EARLY_STOP_MIN_DIST
-from frame_embedder import embed_frames
+
+# Auto-detect Streamlit Cloud environment (has /mount/src path)
+# When running on Streamlit Cloud, disable CLIP to save memory
+IS_STREAMLIT_CLOUD = os.path.exists("/mount/src")
+
+# Only import CLIP embedder if NOT on Streamlit Cloud
+if not IS_STREAMLIT_CLOUD:
+    from frame_embedder import embed_frames
+else:
+    embed_frames = None  # Will use uniform sampling instead
 
 logger = logging.getLogger(__name__)
 
@@ -145,6 +155,37 @@ def select_keyframes(video_path: str, scenes: list, captured_frames: dict = None
         logger.warning("[selector] no candidate frames read -> returning empty")
         return []
 
+    # Check if we're on Streamlit Cloud (use uniform sampling) or local (use CLIP)
+    if IS_STREAMLIT_CLOUD or embed_frames is None:
+        # STREAMLIT CLOUD MODE: Uniform sampling (no CLIP to save memory)
+        logger.info(f"[selector] Streamlit Cloud detected -> using uniform sampling (CLIP disabled)")
+        budget = min(MAX_FRAMES, len(images))
+        
+        # Evenly space frame indices across the candidate pool
+        if len(images) <= budget:
+            selected_idx = list(range(len(images)))
+        else:
+            step = len(images) / budget
+            selected_idx = [int(i * step) for i in range(budget)]
+        
+        # Assemble result in temporal order
+        result = []
+        for idx in sorted(selected_idx):
+            c = valid[idx]
+            result.append(SelectedFrame(
+                frame_index=c["frame_index"],
+                timestamp_sec=c["timestamp_sec"],
+                scene_id=c["scene_id"],
+                novelty_score=0.0,  # No novelty score without CLIP
+                image=images[idx],
+            ))
+        
+        logger.info(
+            f"✅ [selector] DONE (uniform): {len(result)} keyframes selected in {time.time() - t0:.2f}s"
+        )
+        return result
+
+    # LOCAL/DOCKER MODE: Full CLIP-based selection
     # 3. Embed the entire pooled candidate set in one batched pass.
     t_emb = time.time()
     embeddings = embed_frames(images, EMBEDDING_BATCH_SIZE)
