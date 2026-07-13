@@ -17,13 +17,15 @@ logger = logging.getLogger(__name__)
 class FireworksClient:
     """Wrapper around Fireworks AI OpenAI-compatible API."""
 
-    def __init__(self, api_key: str, base_url: str = "https://api.fireworks.ai/inference/v1"):
+    def __init__(self, api_key: str, base_url: str = "https://api.fireworks.ai/inference/v1", api_type: str = "text"):
         """
         Initialize the Fireworks client.
 
         Args:
             api_key: Fireworks AI API key
             base_url: Fireworks API base URL
+            api_type: 'vision' or 'text' — sent as X-API-Type header for the
+                      Cloudflare Worker proxy to route to the correct fallback chain
         """
         if not api_key:
             raise ValueError(
@@ -37,7 +39,8 @@ class FireworksClient:
             api_key=api_key,
             base_url=base_url
         )
-        logger.info(f"FireworksClient initialized with base_url: {base_url}")
+        self.client.default_headers["X-API-Type"] = api_type
+        logger.info(f"FireworksClient initialized with base_url: {base_url} (type={api_type})")
 
     def analyze_image_base64(
         self,
@@ -146,7 +149,7 @@ def get_fireworks_client(api_key: str = None, base_url: str = None) -> Fireworks
         key = api_key or FIREWORKS_API_KEY
         url = base_url or FIREWORKS_BASE_URL
 
-        _vision_client = FireworksClient(key, url)
+        _vision_client = FireworksClient(key, url, api_type="vision")
 
     return _vision_client
 
@@ -173,6 +176,6 @@ def get_fireworks_text_client(api_key: str = None, base_url: str = None) -> Fire
         key = api_key or FIREWORKS_TEXT_API_KEY
         url = base_url or FIREWORKS_TEXT_BASE_URL
 
-        _text_client = FireworksClient(key, url)
+        _text_client = FireworksClient(key, url, api_type="text")
 
     return _text_client
