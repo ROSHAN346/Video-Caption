@@ -66,28 +66,23 @@ st.markdown(
 with st.sidebar:
     st.header("⚙️ Configuration")
     
-    # Allow real-time keys in the sidebar (perfect for cloud deployment!)
-    worker_url_input = st.text_input(
-        "WORKER_URL", 
-        value=os.getenv("WORKER_URL", "https://patient-violet-5828.viratforedu175.workers.dev"),
-        help="Cloudflare Worker proxy URL that handles API requests"
-    )
+    # Allow real-time API key input in the sidebar
     api_key_input = st.text_input(
         "Fireworks API Key (Optional)", 
         value=os.getenv("FIREWORKS_API_KEY", ""), 
         type="password",
-        help="Direct Fireworks API key. Optional if WORKER_URL is set"
+        help="Direct Fireworks API key. Optional if using default backend."
     )
     
-    # Inject selected keys into current environment
+    # Use default worker URL internally (hidden from user)
+    worker_url_input = os.getenv("WORKER_URL", "https://patient-violet-5828.viratforedu175.workers.dev")
+    
+    # Inject keys into current environment
     if worker_url_input:
         os.environ["WORKER_URL"] = worker_url_input
     if api_key_input:
         os.environ["FIREWORKS_API_KEY"] = api_key_input
         os.environ["FIREWORKS_TEXT_API_KEY"] = api_key_input
-        
-    st.divider()
-    st.caption(f"Python: `{sys.executable}`")
     
     if cfg is not None:
         with st.expander("🧩 Model & Fine-Tuning Info", expanded=False):
