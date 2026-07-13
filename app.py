@@ -1,5 +1,6 @@
 """Professional Streamlit UI — Video Captioning Pipeline."""
 
+import hashlib
 import json
 import os
 import re
@@ -16,8 +17,6 @@ try:
 except ImportError:
     sac = None
     SAC_AVAILABLE = False
-
-import streamlit.components.v1 as components
 
 try:
     import config as cfg
@@ -546,13 +545,14 @@ def show_results(results: list, times: dict):
 
     # Per-video
     task_ids = [r.get("task_id", f"task_{i}") for i, r in enumerate(results)]
-    # Use unique key per task_id to avoid dup ID errors when re-rendered
+    # Use a stable hash of the task_ids as key to avoid StreamlitDuplicateElementId when re-rendered
+    key_hash = hashlib.md5(",".join(task_ids).encode()).hexdigest()[:10]
     selected = st.selectbox(
         "Select video",
         task_ids,
         index=0,
         label_visibility="collapsed",
-        key=f"batch_result_select_{len(task_ids)}_{task_ids[0] if task_ids else 'empty'}",
+        key=f"batch_result_select_{key_hash}",
     )
 
     idx = task_ids.index(selected)
