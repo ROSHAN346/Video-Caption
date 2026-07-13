@@ -539,7 +539,14 @@ def show_results(results: list, times: dict):
 
     # Per-video
     task_ids = [r.get("task_id", f"task_{i}") for i, r in enumerate(results)]
-    selected = st.selectbox("Select video", task_ids, index=0, label_visibility="collapsed")
+    # Use unique key per task_id to avoid dup ID errors when re-rendered
+    selected = st.selectbox(
+        "Select video",
+        task_ids,
+        index=0,
+        label_visibility="collapsed",
+        key=f"batch_result_select_{len(task_ids)}_{task_ids[0] if task_ids else 'empty'}",
+    )
 
     idx = task_ids.index(selected)
     result = results[idx]
@@ -622,9 +629,10 @@ with tab_single:
                 style_choices,
                 index=0,
                 help="'All Styles' generates captions in 4 different tones.",
+                key="single_style_select",
             )
             st.markdown('<div class="gap-sm"></div>', unsafe_allow_html=True)
-            run_btn = st.button("▶  Run Pipeline", type="primary", use_container_width=True)
+            run_btn = st.button("▶  Run Pipeline", type="primary", width='stretch')
             st.markdown('</div>', unsafe_allow_html=True)
 
         if run_btn:
@@ -646,7 +654,7 @@ with tab_single:
                 kind = "info" if status == "running" else ("success" if status == "done" else "error")
                 status_text = "Running" if status == "running" else ("Complete" if status == "done" else "Error")
                 with progress_anchor.container():
-                    components.html(_auto_scroll_js(), height=0)
+                    st.iframe(_auto_scroll_js(), height=0, scrolling=False)
                     st.markdown(
                         f"""
                         <div id="pipeline-progress-anchor"></div>
@@ -781,7 +789,7 @@ with tab_single:
                     with cols[i % len(cols)]:
                         st.markdown('<div class="kf-card">', unsafe_allow_html=True)
                         if img_path.exists():
-                            st.image(str(img_path), use_container_width=True)
+                            st.image(str(img_path), width='stretch')
                         st.markdown(
                             f'<div class="kf-meta">Scene {kf.get("scene_id")}</div>'
                             f'<div class="kf-time">{kf.get("timestamp_sec")}s</div>',
@@ -844,7 +852,7 @@ with tab_batch:
             run_batch = run_col.button(
                 "▶  Run Batch Pipeline",
                 type="primary",
-                use_container_width=True,
+                width='stretch',
             )
 
             if run_batch:
