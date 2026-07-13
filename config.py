@@ -51,19 +51,29 @@ DEADLINE_SECONDS = float(os.getenv("DEADLINE_SECONDS", "510"))
 
 # --- Cloudflare Worker Proxy ---
 # When set, all API calls go through this worker (which handles auth + fallback).
+# The worker exposes /vision/chat/completions and /text/chat/completions so we
+# append the route prefix when building the base URLs.
 # Direct Fireworks keys below become optional and can use "worker-proxy" as dummy.
 WORKER_URL = os.getenv("WORKER_URL", "")
 
 # --- Fireworks AI Configuration (vision) ---
 FIREWORKS_API_KEY = os.getenv("FIREWORKS_API_KEY", "") or (WORKER_URL and "worker-proxy") or ""
-FIREWORKS_BASE_URL = os.getenv("FIREWORKS_BASE_URL", "") or WORKER_URL or "https://api.fireworks.ai/inference/v1"
+FIREWORKS_BASE_URL = (
+    os.getenv("FIREWORKS_BASE_URL", "")
+    or (WORKER_URL and f"{WORKER_URL.rstrip('/')}/vision")
+    or "https://api.fireworks.ai/inference/v1"
+)
 FIREWORKS_VISION_MODEL = os.getenv("FIREWORKS_VISION_MODEL", "accounts/fireworks/models/minimax-m3")
 
 # --- Fireworks AI Configuration (text) ---
 # Separate key so vision and text can run on different Fireworks accounts.
 # Falls back to the vision key when unset.
 FIREWORKS_TEXT_API_KEY = os.getenv("FIREWORKS_TEXT_API_KEY", "") or FIREWORKS_API_KEY
-FIREWORKS_TEXT_BASE_URL = os.getenv("FIREWORKS_TEXT_BASE_URL", "") or WORKER_URL or FIREWORKS_BASE_URL
+FIREWORKS_TEXT_BASE_URL = (
+    os.getenv("FIREWORKS_TEXT_BASE_URL", "")
+    or (WORKER_URL and f"{WORKER_URL.rstrip('/')}/text")
+    or FIREWORKS_BASE_URL
+)
 FIREWORKS_TEXT_MODEL = os.getenv("FIREWORKS_TEXT_MODEL", "accounts/fireworks/models/gpt-oss-120b")
 
 # --- Report Generation ---
