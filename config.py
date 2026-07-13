@@ -79,6 +79,9 @@ FIREWORKS_TEXT_MODEL = os.getenv("FIREWORKS_TEXT_MODEL", "accounts/fireworks/mod
 # --- Report Generation ---
 REPORT_STYLES = [
     "formal",
+    "sarcastic",
+    "humorous_tech",
+    "humorous_non_tech",
 ]
 DEFAULT_REPORT_STYLE = "formal"
 REPORT_CACHE_ENABLED = True
